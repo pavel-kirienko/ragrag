@@ -125,12 +125,12 @@ Supported MVP file types:
 For each file maintain:
 - absolute path
 - size
-- mtime_ns
-- optional content hash (lazy, only if needed for collision-proofing)
+- `content_hash_sha256` for change detection
 
 Staleness check:
-- if `(size, mtime_ns)` unchanged and indexed -> skip reindex
-- else remove old points for path, re-ingest file
+1. compute `content_hash_sha256` over file content
+2. if hash unchanged and already indexed -> skip reindex
+3. if hash changed (or file is new) -> remove old points for path, re-ingest file
 
 ### 4.4 Content extraction
 
@@ -200,10 +200,9 @@ Payload fields:
 - `page` (nullable)
 - `start_line` (nullable)
 - `end_line` (nullable)
-- `bbox` (nullable; for image region hints)
 - `excerpt` (short text)
 - `mtime_ns`
-- `fingerprint`
+- `content_hash_sha256`
 
 Indices:
 - payload index on `path`
@@ -226,8 +225,7 @@ Location hint strategy:
 - text segments: line range from chunk metadata
 - PDF/image visual segments:
    - page number
-   - optional approximate region from similarity heatmap-to-grid mapping
-   - OCR snippet closest to top-scoring region (if available)
+   - no region-level location output in MVP
 
 ### 4.8 Result formatter
 
@@ -259,11 +257,19 @@ Field definitions:
 ```json
 {
   "query": "clock tree diagram and APB domain clocks",
+  "status": "complete",
   "indexed_now": {
     "files_added": 3,
     "files_updated": 1,
     "files_skipped_unchanged": 27
   },
+  "skipped_files": [
+    {
+      "path": "/abs/path/build/firmware.elf",
+      "reason": "unsupported_file_type"
+    }
+  ],
+  "errors": [],
   "results": [
     {
       "rank": 1,
@@ -274,7 +280,6 @@ Field definitions:
       "page": 114,
       "start_line": null,
       "end_line": null,
-      "bbox": [0.22, 0.18, 0.91, 0.74],
       "excerpt": "RCC clock distribution and PLL branches..."
     }
   ],
@@ -289,6 +294,11 @@ Field definitions:
   }
 }
 ```
+
+Field additions:
+- `status`: `complete` or `partial` (partial means some files failed or indexing timed out)
+- `skipped_files[]`: each skipped path with explicit reason
+- `errors[]`: non-fatal ingestion/query errors surfaced to caller
 
 ## 6. Detailed Runtime Flow
 
@@ -320,7 +330,7 @@ FileState = {
   "path": str,
   "size": int,
   "mtime_ns": int,
-  "fingerprint": str,
+  "content_hash_sha256": str,
   "last_indexed_at": float,
   "point_ids": list[str]
 }
@@ -336,7 +346,6 @@ Segment = {
   "page": int | None,
   "start_line": int | None,
   "end_line": int | None,
-  "bbox": tuple[float, float, float, float] | None,
   "excerpt": str
 }
 ```
@@ -350,9 +359,11 @@ For a query like `"clock tree diagram"`:
 - MaxSim matching can score relevant visual regions even with sparse/no text
 
 ### 8.2 Excerpt generation policy
-- if text chunk hit: excerpt from chunk text around strongest local match
-- if image hit with OCR text: excerpt from OCR near matched region
-- if image hit without OCR: excerpt fallback like `"Visual match on page 114 (clock diagram region)."`
+- if text chunk hit: a large excerpt from chunk text around strongest local match
+- if image hit with OCR text: large excerpt from OCR text, plus image itself
+- if image hit without OCR: image itself plus excerpt fallback like `"Visual match on page 114."`
+
+Search results always include the location where the match has occurred and the relevant text plus image (if any).
 
 ### 8.3 Ranking normalization
 Because mixed modalities can have score-scale differences:
@@ -415,6 +426,10 @@ Core:
 - `numpy`
 - `pydantic`
 
+Dev/test:
+- `pytest`
+- `PyYAML`
+
 System packages:
 - `tesseract-ocr`
 
@@ -424,8 +439,18 @@ System packages:
 ragrag/
   pyproject.toml
   README.md
-  docs/
-    local-cpu-multimodal-mcp-search-design.md
+  DESIGN.md
+  scripts/
+    fetch_validation_data.py
+    validate_search.py
+    search_cli.py
+  validation/
+    fixtures/
+      pdfs/
+    expected/
+      queries.yaml
+  tests/
+    test_validation.py
   src/
     mcp_server.py
     config.py
@@ -470,14 +495,14 @@ ragrag/
 ### Phase 5: hardening
 - timeouts
 - partial-failure reporting
-- benchmark script and tuning defaults
+- automated validation harness and tuning defaults
 
 ## 15. MVP Acceptance Criteria
 
 1. Query over a directory containing mixed text/PDF/images returns ranked semantic matches.
 2. First query lazily indexes files; repeated query avoids unnecessary reindex when unchanged.
 3. Diagram-centric query (e.g. `"clock tree diagram"`) can hit relevant PDF page/image even when text extraction is weak.
-4. Results include file path and approximate location (`page` and/or `line range` and optional `bbox`).
+4. Results include: file path, page number (if applicable, e.g. PDF), large excerpts, images if applicable.
 5. Entire pipeline runs locally on CPU with no network inference.
 
 ## 16. Open Decisions (keep minimal)
@@ -490,27 +515,30 @@ These are implementation details, not architecture changes:
 
 Architecture remains fixed: local CPU-only, single-model multimodal late-interaction retrieval.
 
-## 17. Manual Testing Tool
+## 17. Automated Validation Strategy
 
-Add a simple Python CLI helper for manual testing without an LLM agent:
-- file: `scripts/search_cli.py`
-- purpose: invoke the same `semantic_search` tool path used by MCP and print results
-- output modes:
-  - raw JSON (default, easy for debugging)
-  - Markdown (`--markdown`) for human inspection
+Manual testing should be optional. Primary verification should come from a repeatable validation corpus and automated assertions.
 
-Suggested CLI usage:
+Validation assets:
+- `validation/fixtures/`: local sample documents used for deterministic checks
+- `validation/fixtures/pdfs/FluxGrip_FG40_datasheet.pdf`: seeded from `https://files.zubax.com/products/com.zubax.fluxgrip/FluxGrip_FG40_datasheet.pdf`
+- `validation/expected/queries.yaml`: query-to-expectation mapping (expected file/page presence in top-K)
+- `scripts/fetch_validation_data.py`: downloads/refreshes external fixtures into `validation/fixtures/`
+- `scripts/validate_search.py`: runs indexing + semantic queries and validates expected outcomes
+- `tests/test_validation.py`: pytest entrypoint for CI/local automation
+
+Validation checks (required):
+1. cold run indexes fixture set successfully with `errors=[]`
+2. warm run reports `files_skipped_unchanged > 0` (hash-based incremental indexing works)
+3. diagram query (e.g. `"clock tree diagram"`) returns the FluxGrip datasheet in top-K with non-null `page`
+4. unsupported files are reported in `skipped_files[]` with explicit reasons
+5. non-fatal ingestion failures produce `status="partial"` and populated `errors[]`
+
+Execution:
 ```bash
-python scripts/search_cli.py \
-  --paths ./docs ./datasheets/stm32.pdf \
-  --query "clock tree diagram and APB clocks" \
-  --top-k 8 \
-  --markdown
+python scripts/fetch_validation_data.py
+python scripts/validate_search.py
+pytest -q
 ```
 
-Recommended behavior:
-- accepts repeated `--paths`
-- validates path existence before request
-- calls the same internal search service entrypoint as MCP handler (no duplicated logic)
-- prints `indexed_now`, `timing_ms`, and ranked results
-- exits non-zero on validation/runtime errors
+Manual CLI remains available for ad-hoc debugging (`scripts/search_cli.py`), but it is not the primary test gate.
