@@ -17,3 +17,7 @@ The test suite must include:
 The config documentation requires a detailed explanation for every field. Right now the purpose of `chunk_overlap` is unclear, for example.
 
 `max_files` is not needed, we always index everything (assume infinity). `follow_symlinks` should be enabled by default. `indexing_timeout` should be set to 100000 by default to allow long unattended runs.
+
+---
+
+When all of the above are done, the project needs to be published on PyPI as `ragrag`. Use env var `PYPI_API_TOKEN`.

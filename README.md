@@ -58,6 +58,41 @@ It is possible to set the defaults per directory via the config file. Ragrag wil
 }
 ```
 
+## Rationale
+
+LLM coding agents working on embedded projects need fast semantic lookup over large local documentation sets:
+- source trees
+- PDF datasheets and reference manuals
+- image files with text/diagrams
+
+Traditional text-only RAG misses diagram-heavy content (clock trees, pin mux diagrams, timing plots, block diagrams). We need a single search system that can retrieve both textual and visual evidence.
+
+### Why multimodal is mandatory
+
+Electronics documents contain content that is not faithfully representable as plain text:
+- schematics
+- signal timing diagrams
+- clock trees
+- annotated block diagrams
+
+Therefore, the MVP must index:
+- text
+- PDF pages as images
+- standalone images
+
+### Goals
+
+- Single local process, works anywhere even without GPU (given enough RAM).
+- No dependency on cloud inference providers.
+- Best feasible retrieval quality for visually rich technical docs.
+- Lazy indexing on first query and on change (index-on-demand).
+
+### Non-goals
+
+- Distributed indexing.
+- Guaranteed real-time indexing of all filesystem changes.
+- Cloud fallback.
+
 ## Development
 
 ```bash
