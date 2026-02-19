@@ -23,7 +23,7 @@ class ColQwenEmbedder:
         )
         self.model = AutoModel.from_pretrained(
             model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="sdpa",
             trust_remote_code=True,
             device_map="cpu",

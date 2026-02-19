@@ -1,33 +1,47 @@
-# ragrag — Local Multimodal Search for Embedded Docs
+<div align="center">
 
-CPU-only semantic search using ColQwen3 late-interaction embeddings + Qdrant MaxSim retrieval.
-Indexes text files, PDFs (page images), and standalone images. Results via JSON or Markdown.
+# Ragrag — local multimodal RAG for documents
 
-## Install
+_RTFM for AI_
 
-```bash
-pip install -e ".[dev]"
-```
+</div>
+
+Local *multimodal* semantic search using ColQwen3 late-interaction embeddings + Qdrant MaxSim retrieval.
+Indexes text files, PDFs with images/diagrams, and standalone images.
+
+Ragrag is originally designed to allow AI agents to read complex technical documentation when doing embedded development, where simple text-based indexing won't work due to abundance of diragrams, schematics, and complex tabular data.
 
 ## Usage
 
+Install:
+
 ```bash
-# Search current directory
-ragrag "clock tree configuration"
-
-# Search specific directories
-ragrag "SPI timing diagram" ./docs ./datasheets
-
-# More results, Markdown output
-ragrag "GPIO initialization" --top-k 20 --markdown
-
-# Override model
-ragrag "motor controller specs" ./pdfs --model TomoroAI/tomoro-colqwen3-embed-4b
+pip install -e .  # TODO: upgrade to `pip install ragrag` when published.
 ```
 
-## Configuration
+⚠️ The very first run will take a **very long time** because the tool will download the model from Huggingface. Despite downloading from the internet, indexing and search run 100% locally.
 
-Create `ragrag.json` (or `.ragrag.json`) in your working directory. All fields are optional:
+Search all supported documents in the current directory and subdirectories that are related to clock tree configuration:
+
+```bash
+ragrag "clock tree configuration"
+```
+
+When a new file is found or an existing file is changed, the model will automatically re-index it (no need to tell it to index manually), which may take anywhere from a few seconds to who knows how long depending on the documents and the performance of your computer (everything is done locally).
+The index is stored in `./.ragrag`; it therefore matters which directory the tool is run from.
+While reindexing is in progress, the tool may log in stderr, while the search results go to stdout.
+
+Search specific directories with more results and with Markdown output:
+
+```bash
+ragrag "GPIO initialization" --top-k 20 --markdown
+```
+
+For more options see `ragrag --help`.
+
+### Configuration files
+
+It is possible to set the defaults per directory via the config file. Ragrag will look for `ragrag.json` or `.ragrag.json` in the current working directory in that order; if not found, it will climb directory tree until one is found. All fields are optional.
 
 ```json
 {
@@ -44,25 +58,7 @@ Create `ragrag.json` (or `.ragrag.json`) in your working directory. All fields a
 }
 ```
 
-## How It Works
-
-1. **First run**: downloads the model (~8GB, one-time, ~10-30 min depending on connection)
-2. **Extraction**: text chunking, PDF page rendering, image OCR
-3. **Embedding**: ColQwen3 4B (CPU, BF16, ~8GB RAM)
-4. **Index**: stored in `.ragrag/` directory (Qdrant local mode)
-5. **Subsequent runs**: skip unchanged files (content hash detection)
-
-Progress and logs go to **stderr**. Results go to **stdout** (pipe-friendly).
-
-## Supported File Types
-
-| Type | Extensions |
-|------|-----------|
-| Text | `.txt`, `.md`, `.rst`, `.c`, `.h`, `.cpp`, `.hpp`, `.py`, `.json`, `.yaml`, `.toml` |
-| PDF  | `.pdf` (each page rendered as image + text extracted) |
-| Image | `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tiff`, `.webp` |
-
-## Tests
+## Development
 
 ```bash
 # Download validation corpus (PDFs, fixtures)
@@ -71,10 +67,3 @@ python scripts/fetch_validation_data.py
 # Run tests (no model required)
 pytest tests/test_validation.py -v
 ```
-
-## Architecture
-
-- **Extractors**: text chunking, PDF page rendering (PyMuPDF), image OCR (Tesseract)
-- **Embedder**: ColQwen3 4B — 320-dim multivector, L2-normalized token embeddings
-- **Store**: Qdrant local mode, MaxSim late-interaction retrieval
-- **CLI**: `src/cli.py` — argparse, JSON stdout, progress stderr
