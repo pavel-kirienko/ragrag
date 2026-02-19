@@ -4,7 +4,7 @@ The program takes a few seconds to start even before downloading the model. Even
 
 Replace pure extension-based file filtering with something more clever like MIME detector, such that we don't have to hardcode every known programming laguage and image format. One idea is to use mimetypes or libmagic.
 
-The tool should only emit stderr info log messages if it has to update the index, in which case it is allowed to be verbose. This is because it may potentially take a (very) long time so we need to keep some liveness indication going. When searching an existing index it is better to stay quiet. These are not 100% hard rules but more of a guiding principle.
+The tool should emit very detailed stderr info log messages if it has to update the index. This is because it may potentially take a (very) long time so we need to keep detailed liveness indication going. When searching an existing index it is better to stay quiet. These are not 100% hard rules but more of a guiding principle.
 
 The test suite must include:
 
