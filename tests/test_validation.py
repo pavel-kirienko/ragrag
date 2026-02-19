@@ -8,7 +8,6 @@ from typing import cast
 
 import yaml
 from PIL import Image, ImageDraw
-from pytest import MonkeyPatch
 
 from src.config import get_settings
 from src.extractors.image_extractor import extract_image_segments
@@ -39,49 +38,24 @@ from src.retrieval.result_formatter import format_as_json, format_as_markdown
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_config_defaults(monkeypatch: MonkeyPatch) -> None:
+def test_config_defaults() -> None:
     """Config loads with correct defaults."""
-    for key in (
-        "ALLOWED_ROOTS",
-        "INCLUDE_HIDDEN_FILES",
-        "FOLLOW_SYMLINKS",
-        "MAX_FILES_PER_REQUEST",
-        "PDF_RENDER_DPI",
-        "OCR_TEXT_THRESHOLD",
-        "CHUNK_TARGET_CHARS",
-        "CHUNK_OVERLAP_CHARS",
-        "TOP_K_DEFAULT",
-        "TOP_K_MAX",
-        "MODEL_ID",
-        "MAX_VISUAL_TOKENS",
-        "TEXT_EMBED_BATCH_SIZE",
-        "IMAGE_EMBED_BATCH_SIZE",
-        "QDRANT_PATH",
-        "QDRANT_COLLECTION",
-        "INDEXING_TIMEOUT_SECONDS",
-    ):
-        monkeypatch.delenv(key, raising=False)
-
     get_settings.cache_clear()
     settings = get_settings()
 
-    assert settings.ALLOWED_ROOTS is None
-    assert settings.INCLUDE_HIDDEN_FILES is False
-    assert settings.FOLLOW_SYMLINKS is False
-    assert settings.MAX_FILES_PER_REQUEST == 10000
-    assert settings.PDF_RENDER_DPI == 200
-    assert settings.OCR_TEXT_THRESHOLD == 50
-    assert settings.CHUNK_TARGET_CHARS == 900
-    assert settings.CHUNK_OVERLAP_CHARS == 100
-    assert settings.TOP_K_DEFAULT == 10
-    assert settings.TOP_K_MAX == 50
-    assert settings.MODEL_ID == "TomoroAI/tomoro-colqwen3-embed-4b"
-    assert settings.MAX_VISUAL_TOKENS == 1280
-    assert settings.TEXT_EMBED_BATCH_SIZE == 4
-    assert settings.IMAGE_EMBED_BATCH_SIZE == 1
-    assert settings.QDRANT_COLLECTION == "ragrag_segments"
-    assert settings.QDRANT_PATH == "./qdrant_data"
-    assert settings.INDEXING_TIMEOUT_SECONDS == 600.0
+    assert settings.index_path == ".ragrag"
+    assert settings.include_hidden is False
+    assert settings.follow_symlinks is False
+    assert settings.max_files == 10000
+    assert settings.pdf_dpi == 200
+    assert settings.ocr_threshold == 50
+    assert settings.chunk_size == 900
+    assert settings.chunk_overlap == 100
+    assert settings.top_k == 10
+    assert settings.max_top_k == 50
+    assert settings.model_id == "TomoroAI/tomoro-colqwen3-embed-4b"
+    assert settings.max_visual_tokens == 1280
+    assert settings.indexing_timeout == 600.0
 
     get_settings.cache_clear()
 
@@ -151,10 +125,9 @@ def test_path_discovery(tmp_path: Path) -> None:
 
     settings = get_settings().model_copy(
         update={
-            "INCLUDE_HIDDEN_FILES": False,
-            "FOLLOW_SYMLINKS": False,
-            "MAX_FILES_PER_REQUEST": 10000,
-            "ALLOWED_ROOTS": None,
+            "include_hidden": False,
+            "follow_symlinks": False,
+            "max_files": 10000,
         }
     )
 
@@ -199,7 +172,7 @@ def test_text_extractor(tmp_path: Path) -> None:
     _ = file_path.write_text(content, encoding="utf-8")
 
     settings = get_settings().model_copy(
-        update={"CHUNK_TARGET_CHARS": 900, "CHUNK_OVERLAP_CHARS": 100}
+        update={"chunk_size": 900, "chunk_overlap": 100}
     )
     segments = extract_text_segments(str(file_path), settings)
 

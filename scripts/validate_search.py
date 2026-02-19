@@ -27,7 +27,7 @@ import yaml
 from src.config import get_settings
 from src.embedding.colqwen_embedder import ColQwenEmbedder
 from src.index.ingest_manager import IngestManager
-from src.index.qdrant_store import QdrantStore
+from src.index.qdrant_store import QdrantStore, COLLECTION_NAME
 from src.models import SearchRequest
 from src.retrieval.search_engine import SearchEngine
 
@@ -190,15 +190,15 @@ def build_engine(model_id: str | None = None) -> SearchEngine:
 
     if model_id:
         # Pydantic settings are normally immutable; use model_copy to override
-        settings = settings.model_copy(update={"MODEL_ID": model_id})
+        settings = settings.model_copy(update={"model_id": model_id})
 
-    logger.info(f"Loading embedder: {settings.MODEL_ID}")
-    embedder = ColQwenEmbedder(settings.MODEL_ID, settings.MAX_VISUAL_TOKENS)
+    logger.info(f"Loading embedder: {settings.model_id}")
+    embedder = ColQwenEmbedder(settings.model_id, settings.max_visual_tokens)
 
-    logger.info(f"Connecting to Qdrant at {settings.QDRANT_PATH}")
+    logger.info(f"Connecting to index at {settings.index_path}")
     store = QdrantStore(
-        settings.QDRANT_PATH,
-        settings.QDRANT_COLLECTION,
+        settings.index_path,
+        COLLECTION_NAME,
         embedder.embedding_dim,
     )
 

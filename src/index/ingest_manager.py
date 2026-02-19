@@ -29,7 +29,7 @@ class IngestManager:
 
         t_start = time.time()
         for idx, file_path in enumerate(file_paths):
-            if time.time() - t_start > self.settings.INDEXING_TIMEOUT_SECONDS:
+            if time.time() - t_start > self.settings.indexing_timeout:
                 per_file_skipped.extend(
                     SkippedFile(path=fp, reason="indexing timeout")
                     for fp in file_paths[idx:]

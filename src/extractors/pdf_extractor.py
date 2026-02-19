@@ -69,14 +69,14 @@ def extract_pdf_segments(
             native_text: str = str(page.get_text(sort=True))  # type: ignore[union-attr]
 
             # 2. Render page to PIL Image
-            pix = page.get_pixmap(dpi=settings.PDF_RENDER_DPI)
+            pix = page.get_pixmap(dpi=settings.pdf_dpi)
             pil_image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)  # type: ignore[arg-type]
             del pix  # free memory immediately
 
             page_images.append(pil_image)
 
             # 3. OCR fallback if native text is sparse
-            if len(native_text.strip()) < settings.OCR_TEXT_THRESHOLD:
+            if len(native_text.strip()) < settings.ocr_threshold:
                 ocr_text = ocr_image(pil_image)
                 text_for_segment = ocr_text
             else:
@@ -97,7 +97,7 @@ def extract_pdf_segments(
 
             # 5. If text is available, chunk it into TEXT segments
             if text_for_segment.strip():
-                text_chunks = _chunk_text(text_for_segment, settings.CHUNK_TARGET_CHARS)
+                text_chunks = _chunk_text(text_for_segment, settings.chunk_size)
                 for chunk in text_chunks:
                     segments.append(
                         Segment(

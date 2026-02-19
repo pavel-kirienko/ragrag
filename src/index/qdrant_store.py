@@ -24,6 +24,9 @@ from qdrant_client.models import (
 from src.models import Segment, MultiVector
 
 
+COLLECTION_NAME = "ragrag_segments"
+
+
 class QdrantStore:
     """Local on-disk Qdrant store with multivector (MaxSim) support."""
 

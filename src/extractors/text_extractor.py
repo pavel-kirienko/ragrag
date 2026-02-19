@@ -21,7 +21,7 @@ def extract_text_segments(path: str, settings: Settings) -> list[Segment]:
     
     Args:
         path: Absolute path to the text file.
-        settings: Settings object with CHUNK_TARGET_CHARS and CHUNK_OVERLAP_CHARS.
+        settings: Settings object with chunk_size and chunk_overlap.
     
     Returns:
         List of Segment objects, one per chunk. Empty list if file is empty or unreadable.
@@ -45,8 +45,8 @@ def extract_text_segments(path: str, settings: Settings) -> list[Segment]:
     chunks = _chunk_text(
         content,
         lines,
-        target_chars=settings.CHUNK_TARGET_CHARS,
-        overlap_chars=settings.CHUNK_OVERLAP_CHARS,
+        target_chars=settings.chunk_size,
+        overlap_chars=settings.chunk_overlap,
     )
     
     # Convert chunks to Segments
