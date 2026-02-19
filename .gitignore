@@ -92,3 +92,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ragrag project-specific
+qdrant_data/
+validation/fixtures/pdfs/

@@ -1,0 +1,66 @@
+# Embedded project configuration for ragrag validation
+
+project:
+  name: stm32f407-demo
+  target: STM32F407VGTx
+  cpu: cortex-m4
+  fpu: true
+  toolchain: arm-none-eabi-gcc
+  version: "1.2.3"
+
+build:
+  optimization: -O2
+  debug_level: -g3
+  warnings:
+    - -Wall
+    - -Wextra
+    - -Werror
+    - -Wno-unused-parameter
+  defines:
+    - STM32F407xx
+    - USE_HAL_DRIVER
+    - HSE_VALUE=8000000
+    - VECT_TAB_OFFSET=0x0
+
+memory:
+  flash:
+    start: 0x08000000
+    size_kb: 1024
+  sram1:
+    start: 0x20000000
+    size_kb: 112
+  sram2:
+    start: 0x2001C000
+    size_kb: 16
+  ccmram:
+    start: 0x10000000
+    size_kb: 64
+
+clock:
+  hse_frequency_hz: 8000000
+  sysclk_hz: 168000000
+  ahb_prescaler: 1
+  apb1_prescaler: 4
+  apb2_prescaler: 2
+  pll:
+    m: 8
+    n: 336
+    p: 2
+    q: 7
+
+peripherals:
+  uart1:
+    baudrate: 115200
+    tx_pin: PA9
+    rx_pin: PA10
+    dma: DMA2_Stream7_CH4
+  spi1:
+    mode: master
+    clock_hz: 10500000
+    cpol: 0
+    cpha: 0
+    nss: software
+  i2c1:
+    speed: fast   # 400 kHz
+    sda_pin: PB7
+    scl_pin: PB6
