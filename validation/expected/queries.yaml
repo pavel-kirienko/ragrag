@@ -1,0 +1,52 @@
+# Validation queries for ragrag semantic search
+# Each query specifies what results should be found in the validation corpus
+
+queries:
+  - id: text_search
+    query: "GPIO initialization STM32"
+    paths: ["validation/fixtures/text/"]
+    expected_paths_contain:
+      - "stm32_gpio_driver"
+    min_results: 1
+    description: "Text search in C source files"
+
+  - id: markdown_search
+    query: "DMA setup embedded"
+    paths: ["validation/fixtures/text/"]
+    expected_paths_contain:
+      - "embedded_notes"
+    min_results: 1
+    description: "Text search in markdown documentation"
+
+  - id: pdf_text_search
+    query: "motor controller specifications"
+    paths: ["validation/fixtures/pdfs/"]
+    expected_paths_contain:
+      - "FluxGrip"
+    min_results: 1
+    description: "Text search in PDF datasheet"
+
+  - id: image_search
+    query: "SPI timing diagram signal"
+    paths: ["validation/fixtures/images/"]
+    expected_paths_contain:
+      - "timing_diagram"
+    min_results: 1
+    description: "Image search for timing diagram"
+
+  - id: unsupported_file_skipped
+    query: "firmware binary"
+    paths: ["validation/fixtures/unsupported/"]
+    expected_paths_contain: []
+    min_results: 0
+    expect_skipped: true
+    description: "Unsupported .elf file should be skipped"
+
+  - id: mixed_corpus_search
+    query: "clock configuration peripheral"
+    paths: ["validation/fixtures/"]
+    expected_paths_contain:
+      - "embedded_notes"
+      - "stm32_gpio_driver"
+    min_results: 1
+    description: "Search across mixed corpus"
