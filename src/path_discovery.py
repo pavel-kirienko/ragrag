@@ -52,13 +52,6 @@ def discover_files(
         else:
             skipped.append(SkippedFile(path=real_path, reason="not a file or directory"))
 
-    # Apply max_files limit
-    if len(discovered) > settings.max_files:
-        truncated = discovered[settings.max_files :]
-        discovered = discovered[: settings.max_files]
-        for path in truncated:
-            skipped.append(SkippedFile(path=path, reason="limit reached"))
-
     return discovered, skipped
 
 

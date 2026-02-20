@@ -46,8 +46,7 @@ def test_config_defaults() -> None:
 
     assert settings.index_path == ".ragrag"
     assert settings.include_hidden is False
-    assert settings.follow_symlinks is False
-    assert settings.max_files == 10000
+    assert settings.follow_symlinks is True
     assert settings.pdf_dpi == 200
     assert settings.ocr_threshold == 50
     assert settings.chunk_size == 900
@@ -56,7 +55,7 @@ def test_config_defaults() -> None:
     assert settings.max_top_k == 50
     assert settings.model_id == "TomoroAI/tomoro-colqwen3-embed-4b"
     assert settings.max_visual_tokens == 1280
-    assert settings.indexing_timeout == 600.0
+    assert settings.indexing_timeout == 100000.0
 
 def test_models_instantiate() -> None:
     """All Pydantic models instantiate correctly."""
@@ -125,7 +124,6 @@ def test_path_discovery(tmp_path: Path) -> None:
         update={
             "include_hidden": False,
             "follow_symlinks": False,
-            "max_files": 10000,
         }
     )
 

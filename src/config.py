@@ -35,12 +35,11 @@ class Settings(BaseModel):
     chunk_overlap: int = Field(default=100, description="Overlap between chunks in characters.")
 
     # Filesystem
-    max_files: int = Field(default=10000, description="Max files per search request.")
     include_hidden: bool = Field(default=False, description="Include hidden files/dirs.")
-    follow_symlinks: bool = Field(default=False, description="Follow symbolic links.")
+    follow_symlinks: bool = Field(default=True, description="Follow symbolic links.")
 
     # Timeouts
-    indexing_timeout: float = Field(default=600.0, description="Soft timeout for indexing in seconds.")
+    indexing_timeout: float = Field(default=100000.0, description="Soft timeout for indexing in seconds.")
 
     model_config = {"extra": "ignore"}
 
