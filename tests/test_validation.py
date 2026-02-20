@@ -116,7 +116,7 @@ def test_path_discovery(tmp_path: Path) -> None:
     _ = (root / "code.c").write_text("int main(void){return 0;}\n", encoding="utf-8")
     _ = (root / "doc.pdf").write_bytes(b"%PDF-1.7\n")
     _ = (root / "notes.md").write_text("# Notes\n", encoding="utf-8")
-    _ = (root / "firmware.elf").write_bytes(b"\x7fELF")
+    _ = (root / "firmware.elf").write_bytes(b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00")
     _ = (root / ".hidden.txt").write_text("hidden", encoding="utf-8")
 
     settings = get_settings().model_copy(

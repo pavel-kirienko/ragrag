@@ -10,6 +10,16 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+import logging as _logging
+
+_log = _logging.getLogger(__name__)
+try:
+    import magic as _magic
+    _HAS_MAGIC = True
+except ImportError:
+    _HAS_MAGIC = False
+    _log.warning("python-magic (libmagic) not found, falling back to extension-based file detection")
+
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -138,13 +148,34 @@ SUPPORTED_EXTENSIONS: frozenset[str] = TEXT_EXTENSIONS | PDF_EXTENSIONS | IMAGE_
 
 
 def get_file_type(path: str) -> Optional[FileType]:
-    """Return the FileType for a given path, or None if unsupported."""
+    """Return the FileType for a given path, or None if unsupported.
+
+    Uses MIME-type detection via libmagic when available; falls back to
+    extension-based detection otherwise.
+    """
     import os
-    ext = os.path.splitext(path)[1].lower()
-    if ext in TEXT_EXTENSIONS:
-        return FileType.TEXT
-    if ext in PDF_EXTENSIONS:
-        return FileType.PDF
-    if ext in IMAGE_EXTENSIONS:
-        return FileType.IMAGE
-    return None
+    if _HAS_MAGIC:
+        try:
+            mime = _magic.from_file(path, mime=True)
+        except Exception:
+            mime = None
+        if mime is None:
+            return None
+        if mime.startswith("text/"):
+            return FileType.TEXT
+        if mime == "application/pdf":
+            return FileType.PDF
+        if mime.startswith("image/"):
+            return FileType.IMAGE
+        # Skip: inode/x-empty (empty), inode/chardevice, application/octet-stream, executables
+        return None
+    else:
+        # Fallback: extension-based
+        ext = os.path.splitext(path)[1].lower()
+        if ext in TEXT_EXTENSIONS:
+            return FileType.TEXT
+        if ext in PDF_EXTENSIONS:
+            return FileType.PDF
+        if ext in IMAGE_EXTENSIONS:
+            return FileType.IMAGE
+        return None

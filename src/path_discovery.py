@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from src.models import SUPPORTED_EXTENSIONS, SkippedFile
+from src.models import SkippedFile
 
 if TYPE_CHECKING:
     from src.config import Settings
@@ -35,10 +35,10 @@ def discover_files(
         real_path = os.path.realpath(abs_path)
 
         if os.path.isfile(abs_path):
-            # Single file: check extension
+            # Single file: check file type
             if not _is_supported_file(real_path):
                 skipped.append(
-                    SkippedFile(path=real_path, reason="unsupported extension")
+                    SkippedFile(path=real_path, reason="unsupported file type")
                 )
             else:
                 discovered.append(real_path)
@@ -90,10 +90,10 @@ def _walk_directory(
                     skipped.append(SkippedFile(path=real_path, reason="symlink"))
                     continue
 
-                # Check extension
+                # Check file type
                 if not _is_supported_file(real_path):
                     skipped.append(
-                        SkippedFile(path=real_path, reason="unsupported extension")
+                        SkippedFile(path=real_path, reason="unsupported file type")
                     )
                     continue
 
@@ -104,6 +104,5 @@ def _walk_directory(
 
 
 def _is_supported_file(path: str) -> bool:
-    """Check if file extension is supported."""
-    ext = os.path.splitext(path)[1].lower()
-    return ext in SUPPORTED_EXTENSIONS
+    from src.models import get_file_type
+    return get_file_type(path) is not None
