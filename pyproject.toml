@@ -29,8 +29,32 @@ dev = [
     "pytest>=7.0.0",
     "pytest-timeout>=2.0.0",
     "PyYAML>=6.0",
+    "nox>=2024.3",
+    "pytest-cov>=4.0",
+    "coverage[toml]>=7.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 300
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ ==",
+]
+
+[tool.coverage.paths]
+source = ["src/", "*/site-packages/src/"]
