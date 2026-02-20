@@ -9,7 +9,7 @@ from typing import cast
 import yaml
 from PIL import Image, ImageDraw
 
-from src.config import get_settings
+from src.config import Settings, get_settings
 from src.extractors.image_extractor import extract_image_segments
 from src.extractors.ocr import is_tesseract_available
 from src.extractors.pdf_extractor import extract_pdf_segments
@@ -40,8 +40,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def test_config_defaults() -> None:
     """Config loads with correct defaults."""
-    get_settings.cache_clear()
-    settings = get_settings()
+    settings = Settings()
 
     assert settings.index_path == ".ragrag"
     assert settings.include_hidden is False
@@ -56,9 +55,6 @@ def test_config_defaults() -> None:
     assert settings.model_id == "TomoroAI/tomoro-colqwen3-embed-4b"
     assert settings.max_visual_tokens == 1280
     assert settings.indexing_timeout == 600.0
-
-    get_settings.cache_clear()
-
 
 def test_models_instantiate() -> None:
     """All Pydantic models instantiate correctly."""

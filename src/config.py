@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-from functools import lru_cache
 
 from pydantic import BaseModel, Field
 
@@ -46,16 +45,53 @@ class Settings(BaseModel):
     model_config = {"extra": "ignore"}
 
 
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Return cached Settings instance. Reads ragrag.json or .ragrag.json from CWD."""
+def _load_settings_from_config(config_path: str) -> Settings:
+    with open(config_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    settings = Settings(**data)
+    config_dir = os.path.dirname(config_path)
+    index_path = settings.index_path
+    if not os.path.isabs(index_path):
+        index_path = os.path.join(config_dir, index_path)
+
+    return settings.model_copy(update={"index_path": os.path.abspath(index_path)})
+
+
+def _load_settings_in_dir(directory: str) -> Settings | None:
     for name in ("ragrag.json", ".ragrag.json"):
-        path = os.path.join(os.getcwd(), name)
-        if os.path.isfile(path):
+        config_path = os.path.join(directory, name)
+        if os.path.isfile(config_path):
             try:
-                with open(path) as f:
-                    data = json.load(f)
-                return Settings(**data)
+                return _load_settings_from_config(config_path)
             except Exception as e:
                 print(f"Warning: Failed to load {name}: {e}", file=sys.stderr)
+    return None
+
+
+def find_index_root(start_dir: str | None = None) -> tuple[str, Settings]:
+    current_dir = os.path.abspath(start_dir or os.getcwd())
+
+    while True:
+        index_path = os.path.join(current_dir, ".ragrag")
+        if os.path.isdir(index_path):
+            return current_dir, Settings(index_path=os.path.abspath(index_path))
+
+        settings = _load_settings_in_dir(current_dir)
+        if settings is not None:
+            return current_dir, settings
+
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            raise SystemExit(
+                "No ragrag index found. Create a config file (ragrag.json) "
+                "or run with --new to create a new index here."
+            )
+        current_dir = parent_dir
+
+
+def get_settings(start_dir: str | None = None) -> Settings:
+    settings = _load_settings_in_dir(os.path.abspath(start_dir or os.getcwd()))
+    if settings is not None:
+        return settings
     return Settings()

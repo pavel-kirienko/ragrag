@@ -14,9 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 
-from src.config import get_settings
+from src.config import find_index_root, get_settings
 from src.embedding.colqwen_embedder import ColQwenEmbedder
 from src.index.ingest_manager import IngestManager
 from src.index.qdrant_store import QdrantStore, COLLECTION_NAME
@@ -77,6 +78,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the embedding model ID.",
     )
     parser.add_argument(
+        "--new",
+        action="store_true",
+        default=False,
+        help="Create a new index in the current directory.",
+    )
+    parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -97,8 +104,15 @@ def main() -> int:
         stream=sys.stderr,
     )
 
-    # Load settings, apply CLI overrides
-    settings = get_settings()
+    if args.new:
+        root_dir = os.getcwd()
+        settings = get_settings(root_dir)
+        index_path = os.path.abspath(os.path.join(root_dir, ".ragrag"))
+        os.makedirs(index_path, exist_ok=True)
+        settings = settings.model_copy(update={"index_path": index_path})
+    else:
+        _, settings = find_index_root()
+
     if args.model:
         settings = settings.model_copy(update={"model_id": args.model})
 
