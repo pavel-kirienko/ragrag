@@ -143,21 +143,32 @@ def test_file_state_tracker(tmp_path: Path) -> None:
     """FileStateTracker detects new/changed/unchanged files."""
     file_path = tmp_path / "state.txt"
     _ = file_path.write_text("alpha", encoding="utf-8")
+    index_dir = tmp_path / ".ragrag"
+    index_dir.mkdir()
 
-    tracker = FileStateTracker()
+    tracker = FileStateTracker(str(index_dir))
     first_hash = compute_file_hash(str(file_path))
     assert isinstance(first_hash, str) and len(first_hash) == 64
 
-    needs_reindex, _ = tracker.check_staleness(str(file_path))
+    needs_reindex, current_state = tracker.check_staleness(str(file_path))
     assert needs_reindex is True
 
-    tracker.mark_indexed(str(file_path), ["point-1", "point-2"])
+    tracker.mark_indexed(
+        str(file_path),
+        ["point-1", "point-2"],
+        file_state=current_state,
+    )
     needs_reindex, _ = tracker.check_staleness(str(file_path))
     assert needs_reindex is False
     assert tracker.get_point_ids(str(file_path)) == ["point-1", "point-2"]
 
+    tracker_reloaded = FileStateTracker(str(index_dir))
+    needs_reindex, _ = tracker_reloaded.check_staleness(str(file_path))
+    assert needs_reindex is False
+    assert tracker_reloaded.get_point_ids(str(file_path)) == ["point-1", "point-2"]
+
     _ = file_path.write_text("beta", encoding="utf-8")
-    needs_reindex, _ = tracker.check_staleness(str(file_path))
+    needs_reindex, _ = tracker_reloaded.check_staleness(str(file_path))
     assert needs_reindex is True
 
 

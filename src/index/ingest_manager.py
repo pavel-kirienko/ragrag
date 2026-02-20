@@ -19,7 +19,7 @@ class IngestManager:
         self.embedder: ColQwenEmbedder = embedder
         self.store: QdrantStore = store
         self.settings: Settings = settings
-        self.file_tracker: FileStateTracker = FileStateTracker()
+        self.file_tracker: FileStateTracker = FileStateTracker(settings.index_path)
 
     def ingest_paths(self, paths: list[str]) -> tuple[IndexingStats, list[SkippedFile]]:
         stats = IndexingStats()
@@ -37,7 +37,7 @@ class IngestManager:
                 break
             try:
                 existing_point_ids = self.file_tracker.get_point_ids(file_path)
-                needs_reindex, _ = self.file_tracker.check_staleness(file_path)
+                needs_reindex, current_state = self.file_tracker.check_staleness(file_path)
 
                 if not needs_reindex:
                     stats.files_skipped_unchanged += 1
@@ -71,7 +71,9 @@ class IngestManager:
                     raise ValueError("image list does not match image-modality segments")
 
                 self.file_tracker.mark_indexed(
-                    file_path, [segment.segment_id for segment in segments]
+                    file_path,
+                    [segment.segment_id for segment in segments],
+                    file_state=current_state,
                 )
 
                 if was_previously_indexed:
