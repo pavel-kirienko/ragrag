@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ast
 import json
 import tempfile
 import uuid
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
+import pytest
 import yaml
 from PIL import Image, ImageDraw
 
@@ -137,6 +139,99 @@ def test_path_discovery(tmp_path: Path) -> None:
     assert "notes.md" in discovered_names
     assert "firmware.elf" in skipped_names
     assert ".hidden.txt" not in discovered_names
+
+
+def test_config_climbing(tmp_path: Path) -> None:
+    from src.config import find_index_root
+
+    ragrag_dir = tmp_path / ".ragrag"
+    ragrag_dir.mkdir()
+    child_dir = tmp_path / "subdir"
+    child_dir.mkdir()
+
+    root, settings = find_index_root(start_dir=str(child_dir))
+    assert str(root) == str(tmp_path)
+    assert settings.index_path == str(ragrag_dir)
+
+
+def test_config_climbing_no_index(tmp_path: Path) -> None:
+    from src.config import find_index_root
+
+    isolated = tmp_path / "isolated"
+    isolated.mkdir()
+
+    with pytest.raises(SystemExit):
+        _ = find_index_root(start_dir=str(isolated))
+
+
+def test_mime_detection_verilog(tmp_path: Path) -> None:
+    from src import models as models_module
+    from src.models import FileType, get_file_type
+
+    verilog_file = tmp_path / "top.v"
+    _ = verilog_file.write_text("module top; endmodule\n", encoding="utf-8")
+
+    ft = get_file_type(str(verilog_file))
+    has_magic = cast(bool, getattr(models_module, "_HAS_MAGIC"))
+    expected = FileType.TEXT if has_magic else None
+    assert ft == expected, f"Expected {expected} for .v file, got {ft}"
+
+
+def test_mime_detection_binary(tmp_path: Path) -> None:
+    from src.models import get_file_type
+
+    elf_file = tmp_path / "firmware.elf"
+    _ = elf_file.write_bytes(b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+
+    ft = get_file_type(str(elf_file))
+    assert ft is None, f"Expected None for ELF binary, got {ft}"
+
+
+def test_mime_detection_empty(tmp_path: Path) -> None:
+    from src import models as models_module
+    from src.models import FileType, get_file_type
+
+    empty_file = tmp_path / "empty.txt"
+    _ = empty_file.write_bytes(b"")
+
+    ft = get_file_type(str(empty_file))
+    has_magic = cast(bool, getattr(models_module, "_HAS_MAGIC"))
+    expected = None if has_magic else FileType.TEXT
+    assert ft == expected, f"Expected {expected} for empty file, got {ft}"
+
+
+def test_qdrant_matchany_import() -> None:
+    source = Path("src/index/qdrant_store.py").read_text(encoding="utf-8")
+    assert "MatchAny" in source, "MatchAny not found in qdrant_store.py"
+    assert "MatchValue(any=" not in source, "Bug: MatchValue(any=...) still present"
+
+
+def test_gpu_detection() -> None:
+    from src.embedding import colqwen_embedder
+
+    detect_device = cast(Callable[[], str], getattr(colqwen_embedder, "_detect_device"))
+    device = detect_device()
+    assert device in ("cuda", "mps", "cpu"), f"Unexpected device: {device}"
+
+
+def test_cli_no_heavy_toplevel_imports() -> None:
+    source = Path("src/cli.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    heavy_modules = {"src.embedding", "src.index", "src.retrieval"}
+
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for heavy in heavy_modules:
+                assert not node.module.startswith(heavy), (
+                    f"Heavy top-level import found at line {node.lineno}: {node.module}"
+                )
+
+
+def test_default_log_level_is_info() -> None:
+    source = Path("src/cli.py").read_text(encoding="utf-8")
+    assert 'default="INFO"' in source or "default='INFO'" in source, (
+        "Default log level is not INFO in cli.py"
+    )
 
 
 def test_file_state_tracker(tmp_path: Path) -> None:
