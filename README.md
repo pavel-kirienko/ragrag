@@ -47,18 +47,35 @@ It is possible to set the defaults per directory via the config file. Ragrag wil
 
 ```json
 {
-  "model_id": "TomoroAI/tomoro-colqwen3-embed-4b",
   "index_path": ".ragrag",
+  "model_id": "TomoroAI/tomoro-colqwen3-embed-4b",
+  "max_visual_tokens": 1280,
   "top_k": 10,
+  "max_top_k": 50,
   "pdf_dpi": 200,
+  "ocr_threshold": 50,
   "chunk_size": 900,
   "chunk_overlap": 100,
-  "max_files": 10000,
   "include_hidden": false,
-  "follow_symlinks": false,
-  "indexing_timeout": 600.0
+  "follow_symlinks": true,
+  "indexing_timeout": 100000
 }
 ```
+
+#### Field Descriptions
+
+- **`index_path`**: Directory where the vector index and metadata are stored. Defaults to `.ragrag`. If a relative path is provided, it's resolved relative to the configuration file location.
+- **`model_id`**: The HuggingFace model identifier for the ColQwen3 embedding model. Defaults to `TomoroAI/tomoro-colqwen3-embed-4b`.
+- **`max_visual_tokens`**: Maximum number of visual tokens processed per image by the embedding model. Higher values capture more visual detail but use more GPU or CPU memory and increase embedding time.
+- **`top_k`**: The default number of search results to return for each query.
+- **`max_top_k`**: The maximum value that `top_k` can be set to. Requests for more results are capped at this value.
+- **`pdf_dpi`**: Resolution in dots per inch used when rendering PDF pages into images for multimodal indexing. Higher DPI improves detail for small text and diagrams but increases processing time.
+- **`ocr_threshold`**: Minimum character count for native PDF text before OCR fallback is skipped. Pages with fewer characters than this threshold are re-processed with Tesseract OCR to ensure visual content is indexed.
+- **`chunk_size`**: Target size for text chunks in characters. Large documents are split into these chunks to fit within the model context window.
+- **`chunk_overlap`**: The number of characters that overlap between consecutive text chunks. This ensures content spanning a chunk boundary is captured in both adjacent chunks, improving search recall for concepts that straddle chunk edges. A value of 0 means no overlap, which risks missing boundary content. 100-200 is typical.
+- **`include_hidden`**: Whether to include hidden files and directories, those starting with a dot, during indexing. Defaults to `false`.
+- **`follow_symlinks`**: Whether to follow symbolic links when discovering files. Default is true, meaning symlinks are followed. Set to false to prevent following symlinks and avoid cycles in recursive directory structures.
+- **`indexing_timeout`**: Soft timeout in seconds for the full indexing phase. When elapsed, remaining files are skipped. Default is 100000, which is effectively unlimited for normal use. Set lower for time-bounded operations.
 
 ## Rationale
 
