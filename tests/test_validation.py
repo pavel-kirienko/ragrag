@@ -347,6 +347,41 @@ def test_qdrant_store() -> None:
         assert len(hits_after_delete) == 0
 
 
+@pytest.mark.timeout(10)
+def test_search_performance(tmp_path: Path) -> None:
+    import random
+    import time
+
+    collection = f"perf_test_{uuid.uuid4().hex}"
+    store = QdrantStore(path=str(tmp_path), collection_name=collection, embedding_dim=128)
+
+    rng = random.Random(42)
+    doc_path = str(tmp_path / "test_doc.txt")
+
+    for i in range(50):
+        segment = Segment(
+            segment_id=str(uuid.uuid4()),
+            path=doc_path,
+            file_type=FileType.TEXT,
+            modality=Modality.TEXT,
+            start_line=i * 10 + 1,
+            end_line=i * 10 + 10,
+            excerpt=f"Segment {i}: GPIO configuration register bank {i}",
+        )
+        vector = [[rng.gauss(0, 1) for _ in range(128)] for _ in range(8)]
+        store.upsert(segment, vector)
+
+    query_vector = [[rng.gauss(0, 1) for _ in range(128)] for _ in range(8)]
+
+    t0 = time.perf_counter()
+    results = store.search(query_vector, top_k=10)
+    elapsed = time.perf_counter() - t0
+
+    assert len(results) > 0, "Search returned no results"
+    assert len(results) <= 10, "Search returned more than top_k results"
+    assert elapsed <= 10.0, f"Search took {elapsed:.2f}s, expected <= 10s"
+
+
 def test_result_formatter() -> None:
     """Result formatter produces valid JSON and Markdown."""
     long_excerpt = "x" * 260
