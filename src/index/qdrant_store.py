@@ -16,7 +16,7 @@ from qdrant_client.models import (
     PointStruct,
     Filter,
     FieldCondition,
-    MatchValue,
+    MatchAny,
     ScoredPoint,
     PointIdsList,
 )
@@ -107,7 +107,7 @@ class QdrantStore:
                 must=[
                     FieldCondition(
                         key="path",
-                        match=MatchValue(any=path_filter),
+                        match=MatchAny(any=path_filter),
                     )
                 ]
             )

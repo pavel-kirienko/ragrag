@@ -8,6 +8,7 @@ Orchestrates the full search pipeline:
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -51,7 +52,7 @@ class SearchEngine:
         # ------------------------------------------------------------------
         t0 = time.time()
         try:
-            stats, skipped = self.ingest_manager.ingest_paths(request.paths)
+            stats, skipped, indexed_paths = self.ingest_manager.ingest_paths(request.paths)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"Indexing error: {exc}")
             stats = IndexingStats()
@@ -86,7 +87,8 @@ class SearchEngine:
         # ------------------------------------------------------------------
         t0 = time.time()
         try:
-            scored_points = self.store.search(query_vec, top_k=request.top_k)
+            filter_paths = [os.path.realpath(os.path.abspath(p)) for p in request.paths]
+            scored_points = self.store.search(query_vec, top_k=request.top_k, path_filter=filter_paths)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"Retrieval error: {exc}")
             scored_points = []

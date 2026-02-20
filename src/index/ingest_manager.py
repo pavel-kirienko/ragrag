@@ -21,7 +21,7 @@ class IngestManager:
         self.settings: Settings = settings
         self.file_tracker: FileStateTracker = FileStateTracker(settings.index_path)
 
-    def ingest_paths(self, paths: list[str]) -> tuple[IndexingStats, list[SkippedFile]]:
+    def ingest_paths(self, paths: list[str]) -> tuple[IndexingStats, list[SkippedFile], list[str]]:
         stats = IndexingStats()
         per_file_skipped: list[SkippedFile] = []
 
@@ -86,7 +86,7 @@ class IngestManager:
                     SkippedFile(path=file_path, reason=f"ingest error: {exc}")
                 )
 
-        return stats, discovery_skipped + per_file_skipped
+        return stats, discovery_skipped + per_file_skipped, file_paths
 
     def _extract_segments(
         self, file_path: str, file_type: FileType
