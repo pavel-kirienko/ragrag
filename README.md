@@ -28,8 +28,10 @@ ragrag "clock tree configuration"
 ```
 
 When a new file is found or an existing file is changed, the model will automatically re-index it (no need to tell it to index manually), which may take anywhere from a few seconds to who knows how long depending on the documents and the performance of your computer (everything is done locally).
-The index is stored in `./.ragrag`; it therefore matters which directory the tool is run from.
-While reindexing is in progress, the tool may log in stderr, while the search results go to stdout.
+
+The index is stored in `.ragrag/`; the tool will attempt to locate an existing index in the current or parent directories. If none is found, it will attempt to guess where to create the index; if it cannot guess reliably, it will ask you to confirm using `--new`.
+
+The tool may log in stderr, while the search results go to stdout.
 
 Search specific directories with more results and with Markdown output:
 
