@@ -8,9 +8,12 @@ Orchestrates the full search pipeline:
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from src.config import Settings
 from src.embedding.colqwen_embedder import ColQwenEmbedder
@@ -81,6 +84,7 @@ class SearchEngine:
                 ),
             )
         query_embedding_ms = (time.time() - t0) * 1000
+        logger.debug("Query embedding: %.1fms", query_embedding_ms)
 
         # ------------------------------------------------------------------
         # Phase 3: Retrieval
@@ -93,6 +97,7 @@ class SearchEngine:
             errors.append(f"Retrieval error: {exc}")
             scored_points = []
         retrieval_ms = (time.time() - t0) * 1000
+        logger.debug("Retrieval: %d results in %.1fms", len(scored_points), retrieval_ms)
 
         # ------------------------------------------------------------------
         # Phase 4: Format results

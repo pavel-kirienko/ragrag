@@ -78,9 +78,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--log-level",
-        default="WARNING",
+        default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging verbosity (default: WARNING). Logs go to stderr.",
+        help="Logging verbosity (default: INFO). Logs go to stderr.",
     )
     return parser
 
@@ -103,6 +103,8 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(message)s",
         stream=sys.stderr,
     )
+    for noisy in ("transformers", "httpx", "urllib3", "qdrant_client", "huggingface_hub"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     if args.new:
         root_dir = os.getcwd()

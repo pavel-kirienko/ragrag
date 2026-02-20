@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import time
 from typing import Callable, cast
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 from src.config import Settings
 from src.embedding.colqwen_embedder import ColQwenEmbedder
@@ -43,6 +46,7 @@ class IngestManager:
                     stats.files_skipped_unchanged += 1
                     continue
 
+                logger.info("Indexing %s (%d/%d)", file_path, idx + 1, len(file_paths))
                 was_previously_indexed = len(existing_point_ids) > 0
                 if was_previously_indexed:
                     self.store.delete_by_ids(existing_point_ids)
@@ -86,6 +90,12 @@ class IngestManager:
                     SkippedFile(path=file_path, reason=f"ingest error: {exc}")
                 )
 
+        if stats.files_added == 0 and stats.files_updated == 0:
+            logger.debug("All %d files unchanged, searching existing index", len(file_paths))
+        logger.info(
+            "Index up to date: %d files unchanged, %d added, %d updated",
+            stats.files_skipped_unchanged, stats.files_added, stats.files_updated,
+        )
         return stats, discovery_skipped + per_file_skipped, file_paths
 
     def _extract_segments(

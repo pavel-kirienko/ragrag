@@ -59,10 +59,12 @@ def extract_pdf_segments(
     segments: list[Segment] = []
     page_images: list[Image.Image] = []
 
-    for page_index in range(len(doc)):
+    total_pages = len(doc)
+    for page_index in range(total_pages):
         page_number = page_index + 1  # 1-indexed
 
         try:
+            logger.info("  Page %d/%d of %s", page_number, total_pages, path)
             page = doc[page_index]
 
             # 1. Extract native text
