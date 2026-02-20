@@ -12,18 +12,11 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
 
 from src.config import find_index_root, get_settings
-from src.embedding.colqwen_embedder import ColQwenEmbedder
-from src.index.ingest_manager import IngestManager
-from src.index.qdrant_store import QdrantStore, COLLECTION_NAME
-from src.models import SearchRequest
-from src.retrieval.result_formatter import format_as_json, format_as_markdown
-from src.retrieval.search_engine import SearchEngine
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -97,6 +90,13 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
+    from src.embedding.colqwen_embedder import ColQwenEmbedder
+    from src.index.ingest_manager import IngestManager
+    from src.index.qdrant_store import QdrantStore, COLLECTION_NAME
+    from src.models import SearchRequest
+    from src.retrieval.result_formatter import format_as_json, format_as_markdown
+    from src.retrieval.search_engine import SearchEngine
+
     # Configure logging to stderr only
     logging.basicConfig(
         level=getattr(logging, args.log_level),
@@ -120,10 +120,7 @@ def main() -> int:
     use_markdown = args.output_markdown
 
     try:
-        # Progress to stderr for long-running ops
-        print("Loading model (this may take a few minutes on first run)...", file=sys.stderr)
         embedder = ColQwenEmbedder(settings.model_id, settings.max_visual_tokens)
-        print("Model loaded.", file=sys.stderr)
 
         store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
         ingest_mgr = IngestManager(embedder, store, settings)

@@ -2,6 +2,7 @@ import logging
 import time
 
 import torch
+from huggingface_hub import try_to_load_from_cache
 from PIL import Image
 from transformers import AutoProcessor, AutoModel
 
@@ -22,30 +23,55 @@ def _detect_device() -> str:
 class ColQwenEmbedder:
     def __init__(self, model_id: str, max_visual_tokens: int = 1280):
         """Load model and processor. Takes ~2-5 min on CPU with swap."""
-        logger.info(f"Loading ColQwen3 model: {model_id}")
         t0 = time.time()
-        self.processor = AutoProcessor.from_pretrained(
-            model_id,
-            trust_remote_code=True,
-            max_num_visual_tokens=max_visual_tokens,
-        )
+        _cached = try_to_load_from_cache(model_id, "config.json")
+        local_only = isinstance(_cached, str)
+        logger.info("Model cache check: %s (local_only=%s)", model_id, local_only)
+        logger.info("Loading model %s (local_files_only=%s)", model_id, local_only)
+
         try:
-            self.model = AutoModel.from_pretrained(
+            self.processor = AutoProcessor.from_pretrained(
                 model_id,
-                dtype=torch.bfloat16,
-                attn_implementation="sdpa",
                 trust_remote_code=True,
-                device_map="auto",
-            ).eval()
-        except torch.cuda.OutOfMemoryError:
-            logger.warning("GPU out of memory, falling back to CPU")
-            self.model = AutoModel.from_pretrained(
+                max_num_visual_tokens=max_visual_tokens,
+                local_files_only=local_only,
+            )
+        except FileNotFoundError:
+            logger.warning("Cache miss for processor, retrying without local_files_only")
+            self.processor = AutoProcessor.from_pretrained(
                 model_id,
-                dtype=torch.bfloat16,
-                attn_implementation="sdpa",
                 trust_remote_code=True,
-                device_map="cpu",
-            ).eval()
+                max_num_visual_tokens=max_visual_tokens,
+                local_files_only=False,
+            )
+
+        def _load_model(local_files_only: bool):
+            try:
+                return AutoModel.from_pretrained(
+                    model_id,
+                    dtype=torch.bfloat16,
+                    attn_implementation="sdpa",
+                    trust_remote_code=True,
+                    device_map="auto",
+                    local_files_only=local_files_only,
+                ).eval()
+            except torch.cuda.OutOfMemoryError:
+                logger.warning("GPU out of memory, falling back to CPU")
+                return AutoModel.from_pretrained(
+                    model_id,
+                    dtype=torch.bfloat16,
+                    attn_implementation="sdpa",
+                    trust_remote_code=True,
+                    device_map="cpu",
+                    local_files_only=local_files_only,
+                ).eval()
+
+        try:
+            self.model = _load_model(local_only)
+        except FileNotFoundError:
+            logger.warning("Cache miss for model, retrying without local_files_only")
+            self.model = _load_model(False)
+
         self.device = next(self.model.parameters()).device
         logger.info(f"Model loaded on device: {self.device}")
         logger.info(f"Model loaded in {time.time() - t0:.1f}s")
