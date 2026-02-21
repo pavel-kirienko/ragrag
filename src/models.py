@@ -6,19 +6,20 @@ No circular imports: this file depends only on stdlib and pydantic.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
 import logging as _logging
 
 _log = _logging.getLogger(__name__)
+_magic: Any | None = None
 try:
-    import magic as _magic
-    _HAS_MAGIC = True
+    import magic as _magic  # type: ignore[import-not-found]
 except ImportError:
-    _HAS_MAGIC = False
     _log.warning("python-magic (libmagic) not found, falling back to extension-based file detection")
+
+_HAS_MAGIC = _magic is not None
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +155,7 @@ def get_file_type(path: str) -> Optional[FileType]:
     extension-based detection otherwise.
     """
     import os
-    if _HAS_MAGIC:
+    if _magic is not None:
         try:
             mime = _magic.from_file(path, mime=True)
         except Exception:
