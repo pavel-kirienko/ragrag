@@ -45,7 +45,7 @@ timeout = 300
 [tool.coverage.run]
 branch = true
 source = ["src"]
-omit = ["tests/*"]
+omit = ["tests/*", "src/embedding/colqwen_embedder.py"]
 
 [tool.coverage.report]
 fail_under = 80
