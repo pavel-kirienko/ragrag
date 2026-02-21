@@ -102,9 +102,12 @@ def main() -> int:
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(message)s",
         stream=sys.stderr,
+        force=True,
     )
     for noisy in ("transformers", "httpx", "urllib3", "qdrant_client", "huggingface_hub"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    print("ragrag: starting up...", file=sys.stderr, flush=True)
 
     if args.new:
         root_dir = os.getcwd()
@@ -115,6 +118,8 @@ def main() -> int:
     else:
         _, settings = find_index_root()
 
+    logging.info("Using index path: %s", settings.index_path)
+
     if args.model:
         settings = settings.model_copy(update={"model_id": args.model})
 
@@ -122,8 +127,10 @@ def main() -> int:
     use_markdown = args.output_markdown
 
     try:
+        logging.info("Initializing model '%s' (first run may take a long time)...", settings.model_id)
         embedder = ColQwenEmbedder(settings.model_id, settings.max_visual_tokens)
 
+        logging.info("Opening local vector store...")
         store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
         ingest_mgr = IngestManager(embedder, store, settings)
         engine = SearchEngine(embedder, store, ingest_mgr, settings)
@@ -135,7 +142,16 @@ def main() -> int:
             include_markdown=use_markdown,
         )
 
+        logging.info("Running indexing + search over %d path(s)...", len(args.paths))
         response = engine.search(request)
+        logging.info(
+            "Search complete: status=%s results=%d added=%d updated=%d skipped_unchanged=%d",
+            response.status,
+            len(response.results),
+            response.indexed_now.files_added,
+            response.indexed_now.files_updated,
+            response.indexed_now.files_skipped_unchanged,
+        )
 
         # Output to stdout
         if use_markdown:

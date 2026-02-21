@@ -163,15 +163,13 @@ def test_config_climbing_no_index(tmp_path: Path) -> None:
 
 
 def test_mime_detection_verilog(tmp_path: Path) -> None:
-    from src import models as models_module
     from src.models import FileType, get_file_type
 
     verilog_file = tmp_path / "top.v"
     _ = verilog_file.write_text("module top; endmodule\n", encoding="utf-8")
 
     ft = get_file_type(str(verilog_file))
-    has_magic = cast(bool, getattr(models_module, "_HAS_MAGIC"))
-    expected = FileType.TEXT if has_magic else None
+    expected = FileType.TEXT
     assert ft == expected, f"Expected {expected} for .v file, got {ft}"
 
 
@@ -186,15 +184,13 @@ def test_mime_detection_binary(tmp_path: Path) -> None:
 
 
 def test_mime_detection_empty(tmp_path: Path) -> None:
-    from src import models as models_module
-    from src.models import FileType, get_file_type
+    from src.models import get_file_type
 
     empty_file = tmp_path / "empty.txt"
     _ = empty_file.write_bytes(b"")
 
     ft = get_file_type(str(empty_file))
-    has_magic = cast(bool, getattr(models_module, "_HAS_MAGIC"))
-    expected = None if has_magic else FileType.TEXT
+    expected = None
     assert ft == expected, f"Expected {expected} for empty file, got {ft}"
 
 
@@ -468,14 +464,12 @@ def test_get_file_type_python(tmp_path: Path) -> None:
     assert get_file_type(str(python_file)) == FileType.TEXT
 
 
-def test_get_file_type_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from src import models as models_module
+def test_get_file_type_json(tmp_path: Path) -> None:
     from src.models import FileType, get_file_type
 
     json_file = tmp_path / "data.json"
     json_file.write_text('{"top_k": 42}\n', encoding="utf-8")
 
-    monkeypatch.setattr(models_module, "_HAS_MAGIC", False)
     assert get_file_type(str(json_file)) == FileType.TEXT
 
 

@@ -11,16 +11,13 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 import importlib
-import logging as _logging
 
-_log = _logging.getLogger(__name__)
-_magic: Any | None = None
 try:
-    _magic = importlib.import_module("magic")
-except ImportError:
-    _log.warning("python-magic (libmagic) not found, falling back to extension-based file detection")
-
-_HAS_MAGIC = _magic is not None
+    _magic: Any = importlib.import_module("magic")
+except ImportError as ex:
+    raise RuntimeError(
+        "python-magic with libmagic is required. Install with `pip install python-magic` and install system libmagic (e.g., `brew install libmagic` on macOS)."
+    ) from ex
 
 
 # ---------------------------------------------------------------------------
@@ -152,34 +149,21 @@ SUPPORTED_EXTENSIONS: frozenset[str] = TEXT_EXTENSIONS | PDF_EXTENSIONS | IMAGE_
 def get_file_type(path: str) -> Optional[FileType]:
     """Return the FileType for a given path, or None if unsupported.
 
-    Uses MIME-type detection via libmagic when available; falls back to
-    extension-based detection otherwise.
+    Uses MIME-type detection via libmagic only.
     """
-    import os
-    if _magic is not None:
-        try:
-            mime = _magic.from_file(path, mime=True)
-        except Exception:
-            mime = None
-        if mime is None:
-            return None
-        if mime.startswith("text/"):
-            return FileType.TEXT
-        if mime == "application/pdf":
-            return FileType.PDF
-        if mime.startswith("image/"):
-            return FileType.IMAGE
-        if mime in ("application/json", "application/xml", "application/javascript", "application/x-yaml", "application/toml"):
-            return FileType.TEXT
-        # Skip: inode/x-empty (empty), inode/chardevice, application/octet-stream, executables
+    try:
+        mime = _magic.from_file(path, mime=True)
+    except Exception:
+        mime = None
+    if mime is None:
         return None
-    else:
-        # Fallback: extension-based
-        ext = os.path.splitext(path)[1].lower()
-        if ext in TEXT_EXTENSIONS:
-            return FileType.TEXT
-        if ext in PDF_EXTENSIONS:
-            return FileType.PDF
-        if ext in IMAGE_EXTENSIONS:
-            return FileType.IMAGE
-        return None
+    if mime.startswith("text/"):
+        return FileType.TEXT
+    if mime == "application/pdf":
+        return FileType.PDF
+    if mime.startswith("image/"):
+        return FileType.IMAGE
+    if mime in ("application/json", "application/xml", "application/javascript", "application/x-yaml", "application/toml"):
+        return FileType.TEXT
+    # Skip: inode/x-empty (empty), inode/chardevice, application/octet-stream, executables
+    return None

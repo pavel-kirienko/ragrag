@@ -16,11 +16,8 @@ Ragrag is originally designed to allow AI agents to read complex technical docum
 Install:
 
 ```bash
-# Python 3.10-3.13 is currently supported. Python 3.14 is not yet supported by PyTorch.
 pip install -e .  # TODO: upgrade to `pip install ragrag` when published.
 ```
-
-On Apple Silicon, Ragrag automatically uses Metal (MPS) when available.
 
 ⚠️ The very first run will take a **very long time** because the tool will download the model from Huggingface. Despite downloading from the internet, indexing and search run 100% locally.
 
