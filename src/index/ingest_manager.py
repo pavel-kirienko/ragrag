@@ -92,10 +92,15 @@ class IngestManager:
 
         if stats.files_added == 0 and stats.files_updated == 0:
             logger.debug("All %d files unchanged, searching existing index", len(file_paths))
-        logger.info(
-            "Index up to date: %d files unchanged, %d added, %d updated",
-            stats.files_skipped_unchanged, stats.files_added, stats.files_updated,
-        )
+            logger.debug(
+                "Index up to date: %d files unchanged, %d added, %d updated",
+                stats.files_skipped_unchanged, stats.files_added, stats.files_updated,
+            )
+        else:
+            logger.info(
+                "Index up to date: %d files unchanged, %d added, %d updated",
+                stats.files_skipped_unchanged, stats.files_added, stats.files_updated,
+            )
         return stats, discovery_skipped + per_file_skipped, file_paths
 
     def _extract_segments(

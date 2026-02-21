@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import sys
 from contextlib import contextmanager
 from collections.abc import Iterator
@@ -89,6 +90,31 @@ def test_parser_version() -> None:
     parser = _build_parser()
     with pytest.raises(SystemExit) as exc_info:
         parser.parse_args(["--version"])
+
+    assert exc_info.value.code == 0
+
+
+def test_main_version_exits_before_runtime_imports(monkeypatch: pytest.MonkeyPatch) -> None:
+    blocked = {
+        "src.embedding.colqwen_embedder",
+        "src.index.ingest_manager",
+        "src.index.qdrant_store",
+        "src.models",
+        "src.retrieval.result_formatter",
+        "src.retrieval.search_engine",
+    }
+    original_import = builtins.__import__
+
+    def guarded_import(name: str, *args: Any, **kwargs: Any):
+        if name in blocked:
+            raise AssertionError(f"unexpected runtime import during --version: {name}")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    monkeypatch.setattr(sys, "argv", ["ragrag", "--version"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
 
     assert exc_info.value.code == 0
 

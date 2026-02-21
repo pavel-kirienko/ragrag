@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, cast
@@ -80,6 +81,42 @@ def test_ingest_modified_file(tmp_path: Path) -> None:
 
     assert stats.files_updated == 1
     assert skipped == []
+
+
+def test_ingest_logs_progress_when_updating_index(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    text_file = tmp_path / "logging.txt"
+    _ = text_file.write_text(_long_text(), encoding="utf-8")
+
+    manager = _build_manager(tmp_path)
+    with caplog.at_level(logging.INFO, logger="src.index.ingest_manager"):
+        stats, skipped, _ = manager.ingest_paths([str(text_file)])
+
+    assert stats.files_added == 1
+    assert skipped == []
+    messages = [record.getMessage() for record in caplog.records if record.name == "src.index.ingest_manager"]
+    assert any("Indexing" in message and "(1/1)" in message for message in messages)
+    assert any("Index up to date:" in message for message in messages)
+
+
+def test_ingest_unchanged_is_quiet_at_info_level(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    text_file = tmp_path / "quiet.txt"
+    _ = text_file.write_text(_long_text(), encoding="utf-8")
+
+    manager = _build_manager(tmp_path)
+    _ = manager.ingest_paths([str(text_file)])
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="src.index.ingest_manager"):
+        stats, skipped, _ = manager.ingest_paths([str(text_file)])
+
+    assert stats.files_skipped_unchanged == 1
+    assert skipped == []
+    info_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "src.index.ingest_manager" and record.levelno >= logging.INFO
+    ]
+    assert info_messages == []
 
 
 def test_ingest_unsupported_file(tmp_path: Path) -> None:
