@@ -1,15 +1,17 @@
 """Nox automation for ragrag tests and coverage."""
 from __future__ import annotations
 
+import importlib
 import os
+from typing import Any, cast
 
-import nox
+nox = cast(Any, importlib.import_module("nox"))
 
 nox.options.sessions = ["unit"]
 
 
 @nox.session(python="3.10")
-def unit(session: nox.Session) -> None:
+def unit(session: Any) -> None:
     """Run unit tests with coverage (no model required)."""
     session.install("-e", ".[dev]")
     session.run(
@@ -26,7 +28,7 @@ def unit(session: nox.Session) -> None:
 
 
 @nox.session(python="3.10")
-def e2e(session: nox.Session) -> None:
+def e2e(session: Any) -> None:
     """Run end-to-end tests with full pipeline (requires HuggingFace model)."""
     if os.environ.get("CI") == "true":
         session.install("--no-deps", ".")
@@ -48,7 +50,7 @@ def e2e(session: nox.Session) -> None:
 
 
 @nox.session(python="3.10")
-def coverage(session: nox.Session) -> None:
+def coverage(session: Any) -> None:
     """Combine coverage data and report (run after unit and e2e)."""
     session.install("coverage[toml]")
     session.run("coverage", "combine", ".coverage.unit", ".coverage.e2e", success_codes=[0, 1])
