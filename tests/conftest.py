@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import sys
 import types
+from typing import Any, cast
 
 
 class _TestEmbedder:
-    embedding_dim = 4
+    embedding_dim: int = 4
 
     def __init__(self, model_id: str, max_visual_tokens: int = 1280) -> None:
         _ = model_id
@@ -30,10 +31,12 @@ def _detect_device() -> str:
 
 if "src.embedding.colqwen_embedder" not in sys.modules:
     module = types.ModuleType("src.embedding.colqwen_embedder")
-    module.ColQwenEmbedder = _TestEmbedder
-    module._detect_device = _detect_device
+    module_any = cast(Any, module)
+    module_any.ColQwenEmbedder = _TestEmbedder
+    module_any._detect_device = _detect_device
     sys.modules["src.embedding.colqwen_embedder"] = module
 
     import src.embedding as embedding_package
 
-    embedding_package.colqwen_embedder = module
+    embedding_package_any = cast(Any, embedding_package)
+    embedding_package_any.colqwen_embedder = module
