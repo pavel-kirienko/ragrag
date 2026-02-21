@@ -454,3 +454,123 @@ def test_validation_fixtures_exist() -> None:
         assert path.exists(), f"Missing fixture: {path}"
         assert path.is_file(), f"Expected file but got non-file: {path}"
         assert path.stat().st_size > 0, f"Fixture is empty: {path}"
+
+
+def test_get_file_type_python(tmp_path: Path) -> None:
+    from src.models import FileType, get_file_type
+
+    python_file = tmp_path / "module.py"
+    python_file.write_text("print('ok')\n", encoding="utf-8")
+
+    assert get_file_type(str(python_file)) == FileType.TEXT
+
+
+def test_get_file_type_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src import models as models_module
+    from src.models import FileType, get_file_type
+
+    json_file = tmp_path / "data.json"
+    json_file.write_text('{"top_k": 42}\n', encoding="utf-8")
+
+    monkeypatch.setattr(models_module, "_HAS_MAGIC", False)
+    assert get_file_type(str(json_file)) == FileType.TEXT
+
+
+def test_get_file_type_image_jpg(tmp_path: Path) -> None:
+    from src.models import FileType, get_file_type
+
+    jpg_file = tmp_path / "image.jpg"
+    jpg_file.write_bytes(
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
+    )
+
+    assert get_file_type(str(jpg_file)) == FileType.IMAGE
+
+
+def test_load_settings_from_config(tmp_path: Path) -> None:
+    from src.config import _load_settings_from_config
+
+    config_file = tmp_path / "ragrag.json"
+    config_file.write_text('{"top_k": 42}\n', encoding="utf-8")
+
+    settings = _load_settings_from_config(str(config_file))
+
+    assert settings.top_k == 42
+
+
+def test_find_index_root_with_config_file(tmp_path: Path) -> None:
+    from src.config import find_index_root
+
+    config_file = tmp_path / "ragrag.json"
+    config_file.write_text('{"top_k": 42, "index_path": "custom-index"}\n', encoding="utf-8")
+
+    root, settings = find_index_root(str(tmp_path))
+
+    assert root == str(tmp_path.resolve())
+    assert settings.top_k == 42
+    assert settings.index_path == str((tmp_path / "custom-index").resolve())
+
+
+def test_get_file_type_extensions(tmp_path: Path) -> None:
+    from src.models import get_file_type
+
+    text_files = {
+        "script.py": "print('ok')\n",
+        "settings.json": '{"key": "value"}\n',
+        "config.yaml": "name: demo\n",
+    }
+    for filename, content in text_files.items():
+        file_path = tmp_path / filename
+        _ = file_path.write_text(content, encoding="utf-8")
+        assert get_file_type(str(file_path)) == FileType.TEXT
+
+    image = Image.new("RGB", (16, 16), "white")
+    for filename in ("photo.jpg", "photo.jpeg", "photo.bmp"):
+        file_path = tmp_path / filename
+        image.save(file_path)
+        assert get_file_type(str(file_path)) == FileType.IMAGE
+
+
+def test_settings_from_config_file(tmp_path: Path) -> None:
+    config_data = {
+        "index_path": "custom-index",
+        "top_k": 7,
+        "include_hidden": True,
+        "indexing_timeout": 12.5,
+    }
+    config_path = tmp_path / "ragrag.json"
+    _ = config_path.write_text(json.dumps(config_data), encoding="utf-8")
+
+    settings = get_settings(str(tmp_path))
+
+    assert settings.index_path == str((tmp_path / "custom-index").resolve())
+    assert settings.top_k == 7
+    assert settings.include_hidden is True
+    assert settings.indexing_timeout == 12.5
+
+
+def test_load_settings_from_config_resolves_index_path(tmp_path: Path) -> None:
+    """_load_settings_from_config resolves relative index_path to absolute."""
+    from src.config import _load_settings_from_config
+    import os
+
+    config = {"index_path": "my_index"}
+    config_file = tmp_path / "ragrag.json"
+    config_file.write_text(json.dumps(config), encoding="utf-8")
+
+    settings = _load_settings_from_config(str(config_file))
+    assert os.path.isabs(settings.index_path)
+    assert settings.index_path.endswith("my_index")
+
+
+def test_load_settings_in_dir_handles_invalid_json(tmp_path: Path, capsys) -> None:
+    """_load_settings_in_dir handles invalid JSON gracefully."""
+    from src.config import _load_settings_in_dir
+
+    config_file = tmp_path / "ragrag.json"
+    config_file.write_text("{ invalid json }", encoding="utf-8")
+
+    result = _load_settings_in_dir(str(tmp_path))
+    assert result is None
+    captured = capsys.readouterr()
+    assert "Warning: Failed to load" in captured.err

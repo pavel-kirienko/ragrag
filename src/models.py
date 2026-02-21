@@ -167,6 +167,8 @@ def get_file_type(path: str) -> Optional[FileType]:
             return FileType.PDF
         if mime.startswith("image/"):
             return FileType.IMAGE
+        if mime in ("application/json", "application/xml", "application/javascript", "application/x-yaml", "application/toml"):
+            return FileType.TEXT
         # Skip: inode/x-empty (empty), inode/chardevice, application/octet-stream, executables
         return None
     else:
