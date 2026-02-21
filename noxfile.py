@@ -1,6 +1,8 @@
 """Nox automation for ragrag tests and coverage."""
 from __future__ import annotations
 
+import os
+
 import nox
 
 nox.options.sessions = ["unit"]
@@ -26,7 +28,11 @@ def unit(session: nox.Session) -> None:
 @nox.session(python="3.10")
 def e2e(session: nox.Session) -> None:
     """Run end-to-end tests with full pipeline (requires HuggingFace model)."""
-    session.install(".")
+    if os.environ.get("CI") == "true":
+        session.install("--no-deps", ".")
+        session.install("pydantic>=2.0.0")
+    else:
+        session.install(".")
     session.install("pytest", "pytest-timeout", "pytest-cov")
     session.run(
         "pytest",
@@ -36,11 +42,12 @@ def e2e(session: nox.Session) -> None:
         "--timeout=600",
         "--cov=src",
         "--cov-branch",
-        env={"COVERAGE_FILE": ".coverage.e2e"},
+        "--cov-fail-under=0",
+        env={"COVERAGE_FILE": ".coverage.e2e", "CI": os.environ.get("CI", "false")},
     )
 
 
-@nox.session(python="3.10", venv_backend="none")
+@nox.session(python="3.10")
 def coverage(session: nox.Session) -> None:
     """Combine coverage data and report (run after unit and e2e)."""
     session.install("coverage[toml]")

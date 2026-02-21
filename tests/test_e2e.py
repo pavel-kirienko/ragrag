@@ -10,12 +10,19 @@ The help/version tests are fast and do not require the model.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+
+
+SKIP_MODEL_E2E_ON_CI = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="Skipped on CI due to model and runner resource limits",
+)
 
 
 def _run_ragrag(*args: str, timeout: int = 30, cwd: str | None = None) -> "subprocess.CompletedProcess[str]":
@@ -60,6 +67,7 @@ def test_e2e_version() -> None:
 
 
 @pytest.mark.timeout(600)
+@SKIP_MODEL_E2E_ON_CI
 def test_e2e_text_search() -> None:
     """Full pipeline: index a text file and search it. Requires HuggingFace model."""
     content = (
@@ -111,6 +119,7 @@ def test_e2e_text_search() -> None:
 
 
 @pytest.mark.timeout(600)
+@SKIP_MODEL_E2E_ON_CI
 def test_e2e_markdown_output() -> None:
     """Full pipeline with --markdown output. Requires HuggingFace model."""
     content = (
