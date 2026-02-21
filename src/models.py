@@ -10,12 +10,13 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+import importlib
 import logging as _logging
 
 _log = _logging.getLogger(__name__)
 _magic: Any | None = None
 try:
-    import magic as _magic  # type: ignore[import-not-found]
+    _magic = importlib.import_module("magic")
 except ImportError:
     _log.warning("python-magic (libmagic) not found, falling back to extension-based file detection")
 
