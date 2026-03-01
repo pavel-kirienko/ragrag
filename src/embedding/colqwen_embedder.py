@@ -45,21 +45,27 @@ class ColQwenEmbedder:
                 local_files_only=False,
             )
 
+        device = _detect_device()
+        dtype = torch.float16 if device == "mps" else torch.bfloat16
+
         def _load_model(local_files_only: bool):
             try:
-                return AutoModel.from_pretrained(
-                    model_id,
-                    dtype=torch.bfloat16,
+                kwargs = dict(
+                    dtype=dtype,
                     attn_implementation="sdpa",
                     trust_remote_code=True,
-                    device_map="auto",
                     local_files_only=local_files_only,
-                ).eval()
+                )
+                if device == "mps":
+                    model = AutoModel.from_pretrained(model_id, **kwargs).eval().to("mps")
+                else:
+                    model = AutoModel.from_pretrained(model_id, device_map=device, **kwargs).eval()
+                return model
             except torch.cuda.OutOfMemoryError:
                 logger.warning("GPU out of memory, falling back to CPU")
                 return AutoModel.from_pretrained(
                     model_id,
-                    dtype=torch.bfloat16,
+                    torch_dtype=torch.bfloat16,
                     attn_implementation="sdpa",
                     trust_remote_code=True,
                     device_map="cpu",
@@ -68,9 +74,12 @@ class ColQwenEmbedder:
 
         try:
             self.model = _load_model(local_only)
-        except FileNotFoundError:
-            logger.warning("Cache miss for model, retrying without local_files_only")
-            self.model = _load_model(False)
+        except (FileNotFoundError, OSError, RuntimeError) as ex:
+            if local_only:
+                logger.warning("Local cache incomplete/unusable (%s), retrying with network", ex)
+                self.model = _load_model(False)
+            else:
+                raise
 
         self.device = next(self.model.parameters()).device
         logger.info(f"Model loaded on device: {self.device}")
