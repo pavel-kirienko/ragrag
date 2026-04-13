@@ -8,7 +8,7 @@ from typing import Any, cast
 class _TestEmbedder:
     embedding_dim: int = 4
 
-    def __init__(self, model_id: str, max_visual_tokens: int = 1280) -> None:
+    def __init__(self, model_id: str, max_visual_tokens: int = 16384) -> None:
         _ = model_id
         _ = max_visual_tokens
 

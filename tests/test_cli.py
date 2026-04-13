@@ -206,6 +206,6 @@ def test_main_model_and_top_k_overrides(monkeypatch: pytest.MonkeyPatch, tmp_pat
         result = main()
 
     assert result == 0
-    mock_embedder_cls.assert_called_once_with("my/model", 1280)
+    mock_embedder_cls.assert_called_once_with("my/model", 16384)
     request = mock_engine_cls.return_value.search.call_args.args[0]
     assert request.top_k == 7

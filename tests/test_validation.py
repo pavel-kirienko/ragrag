@@ -50,11 +50,11 @@ def test_config_defaults() -> None:
     assert settings.pdf_dpi == 200
     assert settings.ocr_threshold == 50
     assert settings.chunk_size == 900
-    assert settings.chunk_overlap == 100
+    assert settings.chunk_overlap == 200
     assert settings.top_k == 10
     assert settings.max_top_k == 50
     assert settings.model_id == "TomoroAI/tomoro-colqwen3-embed-4b"
-    assert settings.max_visual_tokens == 1280
+    assert settings.max_visual_tokens == 16384
     assert settings.indexing_timeout == 100000.0
 
 def test_models_instantiate() -> None:

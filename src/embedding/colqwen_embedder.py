@@ -21,7 +21,7 @@ def _detect_device() -> str:
 
 
 class ColQwenEmbedder:
-    def __init__(self, model_id: str, max_visual_tokens: int = 1280):
+    def __init__(self, model_id: str, max_visual_tokens: int = 16384):
         """Load model and processor. Takes ~2-5 min on CPU with swap."""
         t0 = time.time()
         _cached = try_to_load_from_cache(model_id, "config.json")

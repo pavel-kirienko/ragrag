@@ -49,13 +49,13 @@ It is possible to set the defaults per directory via the config file. Ragrag wil
 {
   "index_path": ".ragrag",
   "model_id": "TomoroAI/tomoro-colqwen3-embed-4b",
-  "max_visual_tokens": 1280,
+  "max_visual_tokens": 16384,
   "top_k": 10,
   "max_top_k": 50,
   "pdf_dpi": 200,
   "ocr_threshold": 50,
   "chunk_size": 900,
-  "chunk_overlap": 100,
+  "chunk_overlap": 200,
   "include_hidden": false,
   "follow_symlinks": true,
   "indexing_timeout": 100000

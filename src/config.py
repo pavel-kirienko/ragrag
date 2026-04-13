@@ -20,7 +20,7 @@ class Settings(BaseModel):
 
     # Embedding model
     model_id: str = Field(default="TomoroAI/tomoro-colqwen3-embed-4b", description="HuggingFace model ID.")
-    max_visual_tokens: int = Field(default=1280, description="Max visual tokens per image.")
+    max_visual_tokens: int = Field(default=16384, description="Max visual tokens per image.")
 
     # Search
     top_k: int = Field(default=10, description="Default number of results.")
@@ -32,7 +32,7 @@ class Settings(BaseModel):
 
     # Text chunking
     chunk_size: int = Field(default=900, description="Target chunk size in characters.")
-    chunk_overlap: int = Field(default=100, description="Overlap between chunks in characters.")
+    chunk_overlap: int = Field(default=200, description="Overlap between chunks in characters.")
 
     # Filesystem
     include_hidden: bool = Field(default=False, description="Include hidden files/dirs.")
