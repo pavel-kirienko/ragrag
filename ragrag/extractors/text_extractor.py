@@ -9,6 +9,9 @@ import logging
 import re
 import uuid
 from pathlib import Path
+from typing import Iterator, Optional
+
+from PIL import Image
 
 from ragrag.config import Settings
 from ragrag.models import FileType, Modality, Segment
@@ -16,48 +19,50 @@ from ragrag.models import FileType, Modality, Segment
 logger = logging.getLogger(__name__)
 
 
-def extract_text_segments(path: str, settings: Settings) -> list[Segment]:
-    """Read a text file and split into chunked Segments.
-    
-    Args:
-        path: Absolute path to the text file.
-        settings: Settings object with chunk_size and chunk_overlap.
-    
-    Returns:
-        List of Segment objects, one per chunk. Empty list if file is empty or unreadable.
+def iter_text_segments(
+    path: str, settings: Settings
+) -> Iterator[tuple[Segment, Optional[Image.Image]]]:
+    """Lazily yield text segments for a single file.
+
+    Each yielded tuple is ``(segment, None)`` (text files have no images).
+    The whole-file content is loaded once; chunks are yielded one at a time
+    so the consumer can embed and upsert without buffering the whole file.
     """
     try:
-        # Read file with UTF-8, fallback to replacement for invalid chars
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
     except Exception as e:
         logger.warning(f"Failed to read {path}: {e}")
-        return []
-    
-    if not content:
-        return []
+        return
 
-    chunks = _chunk_text(
-        content,
-        target_chars=settings.chunk_size,
-        overlap_chars=settings.chunk_overlap,
-    )
-    
-    # Convert chunks to Segments
-    segments = []
-    for chunk_text, start_line, end_line in chunks:
-        segment = Segment(
-            segment_id=str(uuid.uuid4()),
-            path=str(Path(path).resolve()),
-            file_type=FileType.TEXT,
-            modality=Modality.TEXT,
-            start_line=start_line,
-            end_line=end_line,
-            excerpt=chunk_text,
+    if not content:
+        return
+
+    resolved = str(Path(path).resolve())
+    for index, (chunk_text, start_line, end_line) in enumerate(
+        _chunk_text(content, target_chars=settings.chunk_size, overlap_chars=settings.chunk_overlap)
+    ):
+        yield (
+            Segment(
+                segment_id=str(uuid.uuid4()),
+                path=resolved,
+                file_type=FileType.TEXT,
+                modality=Modality.TEXT,
+                start_line=start_line,
+                end_line=end_line,
+                excerpt=chunk_text,
+            ),
+            None,
         )
-        segments.append(segment)
-    
-    return segments
+
+
+def extract_text_segments(path: str, settings: Settings) -> list[Segment]:
+    """Read a text file and split into chunked Segments (eager wrapper).
+
+    Backwards-compatible wrapper around :func:`iter_text_segments` for callers
+    that want the full list at once. New code should prefer the iterator form.
+    """
+    return [seg for seg, _ in iter_text_segments(path, settings)]
 
 
 def _chunk_text(

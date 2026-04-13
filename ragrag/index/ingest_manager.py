@@ -3,14 +3,14 @@ from __future__ import annotations
 import importlib
 import logging
 import time
-from typing import Callable, cast
+from typing import Callable, Iterator, Optional, cast
 from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 from ragrag.config import Settings
 from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
-from ragrag.extractors.text_extractor import extract_text_segments
+from ragrag.extractors.text_extractor import iter_text_segments
 from ragrag.file_state import FileStateTracker
 from ragrag.index.qdrant_store import QdrantStore
 from ragrag.models import FileType, IndexingStats, Modality, Segment, SkippedFile, get_file_type
@@ -55,13 +55,11 @@ class IngestManager:
                 if file_type is None:
                     raise ValueError("unsupported file type")
 
-                segments, images = self._extract_segments(file_path, file_type)
-                vectors = self._embed_segments(segments, images)
-                self.store.upsert_many(list(zip(segments, vectors)))
+                segment_ids = self._stream_embed_and_store(file_path, file_type)
 
                 self.file_tracker.mark_indexed(
                     file_path,
-                    [segment.segment_id for segment in segments],
+                    segment_ids,
                     file_state=current_state,
                 )
 
@@ -88,77 +86,95 @@ class IngestManager:
             )
         return stats, discovery_skipped + per_file_skipped, file_paths
 
-    def _embed_segments(
-        self,
-        segments: list[Segment],
-        images: list[Image.Image],
-    ) -> list:
-        """Embed a file's segments, batching text and keeping images single.
+    def _stream_embed_and_store(self, file_path: str, file_type: FileType) -> list[str]:
+        """Stream segments through embed → upsert without buffering the whole file.
 
-        Text is batched by ``settings.text_batch_size``. On any batch failure we
-        fall back to per-item embedding so a single bad chunk doesn't poison an
-        otherwise-valid file; per-item failures bubble up to the caller and fail
-        the file as they did before.
+        Text segments are accumulated up to ``settings.text_batch_size`` then
+        flushed in one batched forward pass. Image segments flush any pending
+        text first (to preserve emission order), then run a single-item image
+        embed and upsert immediately. The peak memory footprint is roughly:
 
-        Images are embedded one at a time on this 8 GB GPU tier — batching
-        images risks OOM during indexing for little gain (see plan rationale).
-        The ``image_index`` invariant is preserved: IMAGE segments consume the
-        ``images`` list in emitted order.
+            one PIL page image + ``text_batch_size`` text chunks + one
+            image multivector
+
+        which is independent of the source document length. On any text-batch
+        failure we fall back to per-item embedding so one bad chunk doesn't
+        poison an otherwise-valid file.
         """
-        vectors: list = [None] * len(segments)
+        text_batch_size = max(1, int(self.settings.text_batch_size))
+        pending_text: list[Segment] = []
+        all_segment_ids: list[str] = []
 
-        text_indices = [i for i, s in enumerate(segments) if s.modality == Modality.TEXT]
-        batch_size = max(1, int(self.settings.text_batch_size))
-        for start in range(0, len(text_indices), batch_size):
-            group = text_indices[start : start + batch_size]
-            group_texts = [segments[i].excerpt for i in group]
+        def flush_text() -> None:
+            if not pending_text:
+                return
             try:
-                group_vecs = self.embedder.embed_text_chunks(group_texts)
+                vecs = self.embedder.embed_text_chunks([s.excerpt for s in pending_text])
             except Exception as exc:
                 logger.warning(
                     "Batched text embed of %d chunks failed (%s); retrying singles",
-                    len(group_texts), exc,
+                    len(pending_text), exc,
                 )
-                group_vecs = [self.embedder.embed_text_chunk(t) for t in group_texts]
-            for idx, vec in zip(group, group_vecs):
-                vectors[idx] = vec
+                vecs = [self.embedder.embed_text_chunk(s.excerpt) for s in pending_text]
+            self.store.upsert_many(list(zip(pending_text, vecs)))
+            all_segment_ids.extend(s.segment_id for s in pending_text)
+            pending_text.clear()
 
-        image_index = 0
-        for i, segment in enumerate(segments):
+        for segment, image in self._iter_segments(file_path, file_type):
             if segment.modality == Modality.TEXT:
-                continue
-            if segment.modality == Modality.IMAGE:
-                if image_index >= len(images):
+                pending_text.append(segment)
+                if len(pending_text) >= text_batch_size:
+                    flush_text()
+            elif segment.modality == Modality.IMAGE:
+                # Preserve the emission order: any buffered text from the prior
+                # page must land before this image's page does.
+                flush_text()
+                if image is None:
                     raise ValueError("missing image for image-modality segment")
-                vectors[i] = self.embedder.embed_image(images[image_index])
-                image_index += 1
+                vec = self.embedder.embed_image(image)
+                self.store.upsert_many([(segment, vec)])
+                all_segment_ids.append(segment.segment_id)
+                # Drop refs so the next iteration can reclaim the memory.
+                del image, vec
             else:
                 raise ValueError(f"unsupported modality: {segment.modality}")
 
-        if image_index != len(images):
-            raise ValueError("image list does not match image-modality segments")
-
-        for i, v in enumerate(vectors):
-            if v is None:
-                raise ValueError(f"embedding missing for segment at index {i}")
-        return vectors
+        flush_text()
+        return all_segment_ids
 
     def _extract_segments(
         self, file_path: str, file_type: FileType
     ) -> tuple[list[Segment], list[Image.Image]]:
+        """Materialize all segments + images for a file.
+
+        Eager wrapper retained for tests; production ingest goes through
+        :meth:`_iter_segments` / :meth:`_stream_embed_and_store`.
+        """
+        segments: list[Segment] = []
+        images: list[Image.Image] = []
+        for segment, image in self._iter_segments(file_path, file_type):
+            segments.append(segment)
+            if image is not None:
+                images.append(image)
+        return segments, images
+
+    def _iter_segments(
+        self, file_path: str, file_type: FileType
+    ) -> Iterator[tuple[Segment, Optional[Image.Image]]]:
         if file_type == FileType.TEXT:
-            return extract_text_segments(file_path, self.settings), []
+            return iter_text_segments(file_path, self.settings)
         if file_type == FileType.PDF:
             pdf_module = importlib.import_module("ragrag.extractors.pdf_extractor")
-            extract_pdf = cast(
-                Callable[[str, Settings], tuple[list[Segment], list[Image.Image]]],
-                getattr(pdf_module, "extract_pdf_segments"),
+            iter_pdf = cast(
+                Callable[[str, Settings], Iterator[tuple[Segment, Optional[Image.Image]]]],
+                getattr(pdf_module, "iter_pdf_segments"),
             )
-            return extract_pdf(file_path, self.settings)
+            return iter_pdf(file_path, self.settings)
         if file_type == FileType.IMAGE:
             image_module = importlib.import_module("ragrag.extractors.image_extractor")
-            extract_image = cast(
-                Callable[[str, Settings], tuple[list[Segment], list[Image.Image]]],
-                getattr(image_module, "extract_image_segments"),
+            iter_image = cast(
+                Callable[[str, Settings], Iterator[tuple[Segment, Optional[Image.Image]]]],
+                getattr(image_module, "iter_image_segments"),
             )
-            return extract_image(file_path, self.settings)
+            return iter_image(file_path, self.settings)
+        raise ValueError(f"unsupported file type: {file_type}")

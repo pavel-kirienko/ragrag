@@ -121,9 +121,12 @@ class SearchResponse(BaseModel):
 # Type aliases
 # ---------------------------------------------------------------------------
 
-# A multivector is a list of token-level embedding vectors.
-# Each inner list has length == embedding_dim (320 for ColQwen3).
-MultiVector = list[list[float]]
+# A multivector is a 2D array of token-level embedding vectors with shape
+# ``(n_tokens, embedding_dim)`` (embedding_dim is 320 for ColQwen3).
+# Use numpy.ndarray for memory efficiency (4 bytes/float vs ~32 bytes for
+# nested Python lists), but accept any sequence-of-sequence at API
+# boundaries — qdrant-client's PointStruct accepts both.
+MultiVector = Any
 
 
 # ---------------------------------------------------------------------------

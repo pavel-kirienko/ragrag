@@ -194,10 +194,16 @@ def test_mime_detection_empty(tmp_path: Path) -> None:
     assert ft == expected, f"Expected {expected} for empty file, got {ft}"
 
 
-def test_qdrant_matchany_import() -> None:
+def test_store_no_qdrant_client_import() -> None:
+    """Regression: the local store must not drag in qdrant_client.
+
+    The custom mmap-backed store replaced the original qdrant_client.local
+    backend (see ragrag/index/qdrant_store.py), which loaded every point
+    into RAM at __init__ and blew up on medium datasheets. The legacy file
+    name is kept, but the implementation must not reintroduce the import.
+    """
     source = Path("ragrag/index/qdrant_store.py").read_text(encoding="utf-8")
-    assert "MatchAny" in source, "MatchAny not found in qdrant_store.py"
-    assert "MatchValue(any=" not in source, "Bug: MatchValue(any=...) still present"
+    assert "qdrant_client" not in source, "qdrant_client import crept back into qdrant_store.py"
 
 
 def test_gpu_detection() -> None:

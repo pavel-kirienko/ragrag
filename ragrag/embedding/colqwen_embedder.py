@@ -1,6 +1,7 @@
 import logging
 import time
 
+import numpy as np
 import torch
 from huggingface_hub import try_to_load_from_cache
 from PIL import Image
@@ -164,8 +165,12 @@ class ColQwenEmbedder:
         ColQwen3's text processor left-pads the batch, so the "real" tokens for
         a shorter item live in the tail of the sequence. We select by attention
         mask instead of slicing by length, which handles left- or right-padded
-        inputs identically and is byte-for-byte equivalent to the legacy
-        single-item path for batches of size 1.
+        inputs identically.
+
+        Returns a list of float32 ``np.ndarray`` (shape ``(n_tokens_i, 320)``).
+        Numpy is ~8x more memory-efficient than nested Python float lists for
+        the multivector representation — important when batching many text
+        chunks or holding image embeddings during streaming ingest.
         """
         batch = {k: v.to(self.device) for k, v in batch.items()}
         with torch.inference_mode():
@@ -178,7 +183,9 @@ class ColQwenEmbedder:
                 row_tensor = embeddings[i][attn[i].bool()]
             else:
                 row_tensor = embeddings[i]
-            results.append(row_tensor.to(device="cpu", dtype=torch.float32).tolist())
+            arr = row_tensor.to(device="cpu", dtype=torch.float32).numpy()
+            # Detach from any underlying tensor so the caller fully owns it.
+            results.append(np.ascontiguousarray(arr))
         return results
 
     def embed_text_chunks(self, texts: list[str]) -> list[MultiVector]:
