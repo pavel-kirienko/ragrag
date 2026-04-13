@@ -4,6 +4,8 @@
 
 _RTFM for AI_
 
+[![PyPI](https://img.shields.io/pypi/v/ragrag.svg)](https://pypi.org/project/ragrag/)
+
 </div>
 
 Local *multimodal* semantic search using ColQwen3 late-interaction embeddings + Qdrant MaxSim retrieval.
@@ -16,7 +18,7 @@ Ragrag is originally designed to allow AI agents to read complex technical docum
 Install:
 
 ```bash
-pip install -e .  # TODO: upgrade to `pip install ragrag` when published.
+pip install ragrag
 ```
 
 ⚠️ The very first run will take a **very long time** because the tool will download the model from Huggingface. Despite downloading from the internet, indexing and search run 100% locally.
