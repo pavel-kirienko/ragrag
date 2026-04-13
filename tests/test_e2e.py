@@ -59,11 +59,13 @@ def test_e2e_help() -> None:
 
 
 def test_e2e_version() -> None:
-    """ragrag --version exits 0 and shows version number."""
+    """ragrag --version exits 0 and shows the current package version."""
+    from ragrag import __version__
+
     result = _run_ragrag("--version")
     assert result.returncode == 0, f"--version failed: {result.stderr}"
     output = result.stdout + result.stderr
-    assert "0.1.0" in output, f"Expected version 0.1.0 in output, got: {output}"
+    assert __version__ in output, f"Expected version {__version__} in output, got: {output}"
 
 
 @pytest.mark.timeout(600)
