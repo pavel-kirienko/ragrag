@@ -12,7 +12,7 @@ import os
 import time
 from typing import TYPE_CHECKING, cast
 
-from src.models import FileState
+from ragrag.models import FileState
 
 if TYPE_CHECKING:
     pass

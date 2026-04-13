@@ -6,7 +6,7 @@ from huggingface_hub import try_to_load_from_cache
 from PIL import Image
 from transformers import AutoProcessor, AutoModel
 
-from src.models import MultiVector
+from ragrag.models import MultiVector
 
 
 logger = logging.getLogger(__name__)

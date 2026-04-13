@@ -9,10 +9,10 @@ from typing import Any, cast
 import pytest
 from PIL import Image
 
-from src.config import Settings
-from src.index.ingest_manager import IngestManager
-from src.index.qdrant_store import QdrantStore
-from src.models import FileType, Modality
+from ragrag.config import Settings
+from ragrag.index.ingest_manager import IngestManager
+from ragrag.index.qdrant_store import QdrantStore
+from ragrag.models import FileType, Modality
 
 
 class MockEmbedder:
@@ -94,12 +94,12 @@ def test_ingest_logs_progress_when_updating_index(tmp_path: Path, caplog: pytest
     _ = text_file.write_text(_long_text(), encoding="utf-8")
 
     manager = _build_manager(tmp_path)
-    with caplog.at_level(logging.INFO, logger="src.index.ingest_manager"):
+    with caplog.at_level(logging.INFO, logger="ragrag.index.ingest_manager"):
         stats, skipped, _ = manager.ingest_paths([str(text_file)])
 
     assert stats.files_added == 1
     assert skipped == []
-    messages = [record.getMessage() for record in caplog.records if record.name == "src.index.ingest_manager"]
+    messages = [record.getMessage() for record in caplog.records if record.name == "ragrag.index.ingest_manager"]
     assert any("Indexing" in message and "(1/1)" in message for message in messages)
     assert any("Index up to date:" in message for message in messages)
 
@@ -112,7 +112,7 @@ def test_ingest_unchanged_is_quiet_at_info_level(tmp_path: Path, caplog: pytest.
     _ = manager.ingest_paths([str(text_file)])
 
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger="src.index.ingest_manager"):
+    with caplog.at_level(logging.INFO, logger="ragrag.index.ingest_manager"):
         stats, skipped, _ = manager.ingest_paths([str(text_file)])
 
     assert stats.files_skipped_unchanged == 1
@@ -120,7 +120,7 @@ def test_ingest_unchanged_is_quiet_at_info_level(tmp_path: Path, caplog: pytest.
     info_messages = [
         record.getMessage()
         for record in caplog.records
-        if record.name == "src.index.ingest_manager" and record.levelno >= logging.INFO
+        if record.name == "ragrag.index.ingest_manager" and record.levelno >= logging.INFO
     ]
     assert info_messages == []
 
@@ -143,7 +143,7 @@ def test_ingest_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
     manager = _build_manager(tmp_path, indexing_timeout=0)
 
-    from src.index import ingest_manager as ingest_module
+    from ragrag.index import ingest_manager as ingest_module
 
     tick = itertools.count()
     monkeypatch.setattr(ingest_module.time, "time", lambda: float(next(tick)))
@@ -232,7 +232,7 @@ def test_ingest_falls_back_to_singles_on_batch_failure(
     embedder.raise_next_batch = True
     manager = _build_manager_with_embedder(tmp_path, embedder)
 
-    with caplog.at_level(logging.WARNING, logger="src.index.ingest_manager"):
+    with caplog.at_level(logging.WARNING, logger="ragrag.index.ingest_manager"):
         stats, skipped, _ = manager.ingest_paths([str(text_file)])
 
     assert stats.files_added == 1

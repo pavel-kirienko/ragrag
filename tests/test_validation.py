@@ -11,14 +11,14 @@ import pytest
 import yaml
 from PIL import Image, ImageDraw
 
-from src.config import Settings, get_settings
-from src.extractors.image_extractor import extract_image_segments
-from src.extractors.ocr import is_tesseract_available
-from src.extractors.pdf_extractor import extract_pdf_segments
-from src.extractors.text_extractor import extract_text_segments
-from src.file_state import FileStateTracker, compute_file_hash
-from src.index.qdrant_store import QdrantStore
-from src.models import (
+from ragrag.config import Settings, get_settings
+from ragrag.extractors.image_extractor import extract_image_segments
+from ragrag.extractors.ocr import is_tesseract_available
+from ragrag.extractors.pdf_extractor import extract_pdf_segments
+from ragrag.extractors.text_extractor import extract_text_segments
+from ragrag.file_state import FileStateTracker, compute_file_hash
+from ragrag.index.qdrant_store import QdrantStore
+from ragrag.models import (
     IMAGE_EXTENSIONS,
     PDF_EXTENSIONS,
     TEXT_EXTENSIONS,
@@ -33,8 +33,8 @@ from src.models import (
     SkippedFile,
     TimingInfo,
 )
-from src.path_discovery import discover_files
-from src.retrieval.result_formatter import format_as_json, format_as_markdown
+from ragrag.path_discovery import discover_files
+from ragrag.retrieval.result_formatter import format_as_json, format_as_markdown
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -140,7 +140,7 @@ def test_path_discovery(tmp_path: Path) -> None:
 
 
 def test_config_climbing(tmp_path: Path) -> None:
-    from src.config import find_index_root
+    from ragrag.config import find_index_root
 
     ragrag_dir = tmp_path / ".ragrag"
     ragrag_dir.mkdir()
@@ -153,7 +153,7 @@ def test_config_climbing(tmp_path: Path) -> None:
 
 
 def test_config_climbing_no_index(tmp_path: Path) -> None:
-    from src.config import find_index_root
+    from ragrag.config import find_index_root
 
     isolated = tmp_path / "isolated"
     isolated.mkdir()
@@ -163,7 +163,7 @@ def test_config_climbing_no_index(tmp_path: Path) -> None:
 
 
 def test_mime_detection_verilog(tmp_path: Path) -> None:
-    from src.models import FileType, get_file_type
+    from ragrag.models import FileType, get_file_type
 
     verilog_file = tmp_path / "top.v"
     _ = verilog_file.write_text("module top; endmodule\n", encoding="utf-8")
@@ -174,7 +174,7 @@ def test_mime_detection_verilog(tmp_path: Path) -> None:
 
 
 def test_mime_detection_binary(tmp_path: Path) -> None:
-    from src.models import get_file_type
+    from ragrag.models import get_file_type
 
     elf_file = tmp_path / "firmware.elf"
     _ = elf_file.write_bytes(b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00")
@@ -184,7 +184,7 @@ def test_mime_detection_binary(tmp_path: Path) -> None:
 
 
 def test_mime_detection_empty(tmp_path: Path) -> None:
-    from src.models import get_file_type
+    from ragrag.models import get_file_type
 
     empty_file = tmp_path / "empty.txt"
     _ = empty_file.write_bytes(b"")
@@ -195,13 +195,13 @@ def test_mime_detection_empty(tmp_path: Path) -> None:
 
 
 def test_qdrant_matchany_import() -> None:
-    source = Path("src/index/qdrant_store.py").read_text(encoding="utf-8")
+    source = Path("ragrag/index/qdrant_store.py").read_text(encoding="utf-8")
     assert "MatchAny" in source, "MatchAny not found in qdrant_store.py"
     assert "MatchValue(any=" not in source, "Bug: MatchValue(any=...) still present"
 
 
 def test_gpu_detection() -> None:
-    from src.embedding import colqwen_embedder
+    from ragrag.embedding import colqwen_embedder
 
     detect_device = cast(Callable[[], str], getattr(colqwen_embedder, "_detect_device"))
     device = detect_device()
@@ -209,9 +209,9 @@ def test_gpu_detection() -> None:
 
 
 def test_cli_no_heavy_toplevel_imports() -> None:
-    source = Path("src/cli.py").read_text(encoding="utf-8")
+    source = Path("ragrag/cli.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
-    heavy_modules = {"src.embedding", "src.index", "src.retrieval"}
+    heavy_modules = {"ragrag.embedding", "ragrag.index", "ragrag.retrieval"}
 
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
@@ -222,7 +222,7 @@ def test_cli_no_heavy_toplevel_imports() -> None:
 
 
 def test_default_log_level_is_info() -> None:
-    source = Path("src/cli.py").read_text(encoding="utf-8")
+    source = Path("ragrag/cli.py").read_text(encoding="utf-8")
     assert 'default="INFO"' in source or "default='INFO'" in source, (
         "Default log level is not INFO in cli.py"
     )
@@ -456,7 +456,7 @@ def test_validation_fixtures_exist() -> None:
 
 
 def test_get_file_type_python(tmp_path: Path) -> None:
-    from src.models import FileType, get_file_type
+    from ragrag.models import FileType, get_file_type
 
     python_file = tmp_path / "module.py"
     python_file.write_text("print('ok')\n", encoding="utf-8")
@@ -465,7 +465,7 @@ def test_get_file_type_python(tmp_path: Path) -> None:
 
 
 def test_get_file_type_json(tmp_path: Path) -> None:
-    from src.models import FileType, get_file_type
+    from ragrag.models import FileType, get_file_type
 
     json_file = tmp_path / "data.json"
     json_file.write_text('{"top_k": 42}\n', encoding="utf-8")
@@ -474,7 +474,7 @@ def test_get_file_type_json(tmp_path: Path) -> None:
 
 
 def test_get_file_type_image_jpg(tmp_path: Path) -> None:
-    from src.models import FileType, get_file_type
+    from ragrag.models import FileType, get_file_type
 
     jpg_file = tmp_path / "image.jpg"
     jpg_file.write_bytes(
@@ -485,7 +485,7 @@ def test_get_file_type_image_jpg(tmp_path: Path) -> None:
 
 
 def test_load_settings_from_config(tmp_path: Path) -> None:
-    from src.config import _load_settings_from_config
+    from ragrag.config import _load_settings_from_config
 
     config_file = tmp_path / "ragrag.json"
     config_file.write_text('{"top_k": 42}\n', encoding="utf-8")
@@ -496,7 +496,7 @@ def test_load_settings_from_config(tmp_path: Path) -> None:
 
 
 def test_find_index_root_with_config_file(tmp_path: Path) -> None:
-    from src.config import find_index_root
+    from ragrag.config import find_index_root
 
     config_file = tmp_path / "ragrag.json"
     config_file.write_text('{"top_k": 42, "index_path": "custom-index"}\n', encoding="utf-8")
@@ -509,7 +509,7 @@ def test_find_index_root_with_config_file(tmp_path: Path) -> None:
 
 
 def test_get_file_type_extensions(tmp_path: Path) -> None:
-    from src.models import get_file_type
+    from ragrag.models import get_file_type
 
     text_files = {
         "script.py": "print('ok')\n",
@@ -548,7 +548,7 @@ def test_settings_from_config_file(tmp_path: Path) -> None:
 
 def test_load_settings_from_config_resolves_index_path(tmp_path: Path) -> None:
     """_load_settings_from_config resolves relative index_path to absolute."""
-    from src.config import _load_settings_from_config
+    from ragrag.config import _load_settings_from_config
     import os
 
     config = {"index_path": "my_index"}
@@ -562,7 +562,7 @@ def test_load_settings_from_config_resolves_index_path(tmp_path: Path) -> None:
 
 def test_load_settings_in_dir_handles_invalid_json(tmp_path: Path, capsys) -> None:
     """_load_settings_in_dir handles invalid JSON gracefully."""
-    from src.config import _load_settings_in_dir
+    from ragrag.config import _load_settings_in_dir
 
     config_file = tmp_path / "ragrag.json"
     config_file.write_text("{ invalid json }", encoding="utf-8")

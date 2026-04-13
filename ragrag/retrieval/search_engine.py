@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from src.config import Settings
-from src.embedding.colqwen_embedder import ColQwenEmbedder
-from src.index.qdrant_store import QdrantStore
-from src.models import (
+from ragrag.config import Settings
+from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+from ragrag.index.qdrant_store import QdrantStore
+from ragrag.models import (
     IndexingStats,
     SearchRequest,
     SearchResponse,
@@ -27,7 +27,7 @@ from src.models import (
 )
 
 if TYPE_CHECKING:
-    from src.index.ingest_manager import IngestManager
+    from ragrag.index.ingest_manager import IngestManager
 
 
 def _resolve_filter_paths(request_paths: list[str], indexed_paths: list[str]) -> list[str]:

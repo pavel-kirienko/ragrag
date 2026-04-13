@@ -21,7 +21,7 @@ from qdrant_client.models import (
     PointIdsList,
 )
 
-from src.models import Segment, MultiVector
+from ragrag.models import Segment, MultiVector
 
 
 COLLECTION_NAME = "ragrag_segments"

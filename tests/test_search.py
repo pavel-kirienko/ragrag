@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from src.config import Settings
-from src.index.ingest_manager import IngestManager
-from src.index.qdrant_store import QdrantStore
-from src.models import SearchRequest
-from src.retrieval.search_engine import SearchEngine
+from ragrag.config import Settings
+from ragrag.index.ingest_manager import IngestManager
+from ragrag.index.qdrant_store import QdrantStore
+from ragrag.models import SearchRequest
+from ragrag.retrieval.search_engine import SearchEngine
 
 
 class MockEmbedder:

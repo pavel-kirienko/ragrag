@@ -11,9 +11,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from src.config import Settings
-from src.models import FileType, Modality, Segment
-from src.extractors.ocr import ocr_image
+from ragrag.config import Settings
+from ragrag.models import FileType, Modality, Segment
+from ragrag.extractors.ocr import ocr_image
 
 logger = logging.getLogger(__name__)
 

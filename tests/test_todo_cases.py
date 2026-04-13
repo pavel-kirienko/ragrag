@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.config import find_index_root
+from ragrag.config import find_index_root
 
 
 def test_find_index_root_prefers_local_index_dir_over_config(tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ def test_find_index_root_error_contains_create_or_new_guidance(tmp_path: Path) -
 
 
 def test_embedder_source_uses_cache_first_loading_contract() -> None:
-    source = Path("src/embedding/colqwen_embedder.py").read_text(encoding="utf-8")
+    source = Path("ragrag/embedding/colqwen_embedder.py").read_text(encoding="utf-8")
     assert "try_to_load_from_cache" in source
     assert "local_files_only=local_only" in source
 

@@ -8,10 +8,10 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from src.models import SkippedFile
+from ragrag.models import SkippedFile
 
 if TYPE_CHECKING:
-    from src.config import Settings
+    from ragrag.config import Settings
 
 
 def discover_files(
@@ -97,5 +97,5 @@ def _walk_directory(
 
 
 def _is_supported_file(path: str) -> bool:
-    from src.models import get_file_type
+    from ragrag.models import get_file_type
     return get_file_type(path) is not None

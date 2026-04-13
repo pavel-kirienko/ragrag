@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ragrag"
-version = "0.1.0"
+dynamic = ["version"]
 requires-python = ">=3.10,<3.15"
 dependencies = [
     "qdrant-client>=1.12.0,<1.17",
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ragrag = "src.cli:main"
+ragrag = "ragrag.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -34,9 +34,12 @@ dev = [
     "coverage[toml]>=7.0",
 ]
 
+[tool.setuptools.dynamic]
+version = {attr = "ragrag.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["ragrag*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -44,8 +47,8 @@ timeout = 300
 
 [tool.coverage.run]
 branch = true
-source = ["src"]
-omit = ["tests/*", "src/embedding/colqwen_embedder.py"]
+source = ["ragrag"]
+omit = ["tests/*", "ragrag/embedding/colqwen_embedder.py"]
 
 [tool.coverage.report]
 fail_under = 80
@@ -57,4 +60,4 @@ exclude_lines = [
 ]
 
 [tool.coverage.paths]
-source = ["src/", "*/site-packages/src/"]
+source = ["ragrag/", "*/site-packages/ragrag/"]

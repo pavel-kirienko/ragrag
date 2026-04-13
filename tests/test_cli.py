@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 import pytest
 
-from src.cli import _build_parser, main
-from src.config import Settings
-from src.models import IndexingStats, SearchResponse, TimingInfo
+from ragrag.cli import _build_parser, main
+from ragrag.config import Settings
+from ragrag.models import IndexingStats, SearchResponse, TimingInfo
 
 
 class MockEmbedder:
@@ -50,13 +50,13 @@ def _patched_main_dependencies(
 ) -> Iterator[tuple[Any, Any, Any, Any]]:
     settings = Settings(index_path=str(tmp_path / ".ragrag"), top_k=13)
     with (
-        patch("src.embedding.colqwen_embedder.ColQwenEmbedder") as mock_embedder_cls,
-        patch("src.index.qdrant_store.QdrantStore") as mock_store_cls,
-        patch("src.index.ingest_manager.IngestManager") as mock_ingest_cls,
-        patch("src.retrieval.search_engine.SearchEngine") as mock_engine_cls,
-        patch("src.config.find_index_root", return_value=(str(tmp_path), settings)),
-        patch("src.cli.find_index_root", return_value=(str(tmp_path), settings)),
-        patch("src.cli.get_settings", return_value=settings),
+        patch("ragrag.embedding.colqwen_embedder.ColQwenEmbedder") as mock_embedder_cls,
+        patch("ragrag.index.qdrant_store.QdrantStore") as mock_store_cls,
+        patch("ragrag.index.ingest_manager.IngestManager") as mock_ingest_cls,
+        patch("ragrag.retrieval.search_engine.SearchEngine") as mock_engine_cls,
+        patch("ragrag.config.find_index_root", return_value=(str(tmp_path), settings)),
+        patch("ragrag.cli.find_index_root", return_value=(str(tmp_path), settings)),
+        patch("ragrag.cli.get_settings", return_value=settings),
     ):
         mock_embedder_cls.return_value = MockEmbedder()
         if side_effect is not None:
@@ -102,12 +102,12 @@ def test_parser_version() -> None:
 
 def test_main_version_exits_before_runtime_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     blocked = {
-        "src.embedding.colqwen_embedder",
-        "src.index.ingest_manager",
-        "src.index.qdrant_store",
-        "src.models",
-        "src.retrieval.result_formatter",
-        "src.retrieval.search_engine",
+        "ragrag.embedding.colqwen_embedder",
+        "ragrag.index.ingest_manager",
+        "ragrag.index.qdrant_store",
+        "ragrag.models",
+        "ragrag.retrieval.result_formatter",
+        "ragrag.retrieval.search_engine",
     }
     original_import = builtins.__import__
 

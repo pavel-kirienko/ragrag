@@ -24,12 +24,12 @@ from typing import Any
 
 import yaml
 
-from src.config import get_settings
-from src.embedding.colqwen_embedder import ColQwenEmbedder
-from src.index.ingest_manager import IngestManager
-from src.index.qdrant_store import QdrantStore, COLLECTION_NAME
-from src.models import SearchRequest
-from src.retrieval.search_engine import SearchEngine
+from ragrag.config import get_settings
+from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+from ragrag.index.ingest_manager import IngestManager
+from ragrag.index.qdrant_store import QdrantStore, COLLECTION_NAME
+from ragrag.models import SearchRequest
+from ragrag.retrieval.search_engine import SearchEngine
 
 
 logger = logging.getLogger(__name__)

@@ -36,14 +36,14 @@ def _detect_device() -> str:
     return "cpu"
 
 
-if "src.embedding.colqwen_embedder" not in sys.modules:
-    module = types.ModuleType("src.embedding.colqwen_embedder")
+if "ragrag.embedding.colqwen_embedder" not in sys.modules:
+    module = types.ModuleType("ragrag.embedding.colqwen_embedder")
     module_any = cast(Any, module)
     module_any.ColQwenEmbedder = _TestEmbedder
     module_any._detect_device = _detect_device
-    sys.modules["src.embedding.colqwen_embedder"] = module
+    sys.modules["ragrag.embedding.colqwen_embedder"] = module
 
-    import src.embedding as embedding_package
+    import ragrag.embedding as embedding_package
 
     embedding_package_any = cast(Any, embedding_package)
     embedding_package_any.colqwen_embedder = module

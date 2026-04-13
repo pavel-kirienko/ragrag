@@ -8,13 +8,13 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-from src.config import Settings
-from src.embedding.colqwen_embedder import ColQwenEmbedder
-from src.extractors.text_extractor import extract_text_segments
-from src.file_state import FileStateTracker
-from src.index.qdrant_store import QdrantStore
-from src.models import FileType, IndexingStats, Modality, Segment, SkippedFile, get_file_type
-from src.path_discovery import discover_files
+from ragrag.config import Settings
+from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+from ragrag.extractors.text_extractor import extract_text_segments
+from ragrag.file_state import FileStateTracker
+from ragrag.index.qdrant_store import QdrantStore
+from ragrag.models import FileType, IndexingStats, Modality, Segment, SkippedFile, get_file_type
+from ragrag.path_discovery import discover_files
 
 
 class IngestManager:
@@ -149,14 +149,14 @@ class IngestManager:
         if file_type == FileType.TEXT:
             return extract_text_segments(file_path, self.settings), []
         if file_type == FileType.PDF:
-            pdf_module = importlib.import_module("src.extractors.pdf_extractor")
+            pdf_module = importlib.import_module("ragrag.extractors.pdf_extractor")
             extract_pdf = cast(
                 Callable[[str, Settings], tuple[list[Segment], list[Image.Image]]],
                 getattr(pdf_module, "extract_pdf_segments"),
             )
             return extract_pdf(file_path, self.settings)
         if file_type == FileType.IMAGE:
-            image_module = importlib.import_module("src.extractors.image_extractor")
+            image_module = importlib.import_module("ragrag.extractors.image_extractor")
             extract_image = cast(
                 Callable[[str, Settings], tuple[list[Segment], list[Image.Image]]],
                 getattr(image_module, "extract_image_segments"),

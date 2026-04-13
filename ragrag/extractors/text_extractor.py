@@ -10,8 +10,8 @@ import re
 import uuid
 from pathlib import Path
 
-from src.config import Settings
-from src.models import FileType, Modality, Segment
+from ragrag.config import Settings
+from ragrag.models import FileType, Modality, Segment
 
 logger = logging.getLogger(__name__)
 

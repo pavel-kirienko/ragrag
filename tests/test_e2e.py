@@ -38,9 +38,9 @@ def _run_ragrag(*args: str, timeout: int = 30, cwd: str | None = None) -> "subpr
         )
         return result
     except FileNotFoundError:
-        # Fall back to python -m src.cli
+        # Fall back to python -m ragrag.cli
         return subprocess.run(
-            [sys.executable, "-m", "src.cli"] + list(args),
+            [sys.executable, "-m", "ragrag.cli"] + list(args),
             capture_output=True,
             text=True,
             timeout=timeout,

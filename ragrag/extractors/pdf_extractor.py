@@ -21,9 +21,9 @@ except ImportError:
 
 from PIL import Image
 
-from src.config import Settings
-from src.extractors.ocr import ocr_image
-from src.models import FileType, Modality, Segment
+from ragrag.config import Settings
+from ragrag.extractors.ocr import ocr_image
+from ragrag.models import FileType, Modality, Segment
 
 if TYPE_CHECKING:
     pass

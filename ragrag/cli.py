@@ -6,7 +6,8 @@ import logging
 import os
 import sys
 
-from src.config import find_index_root, get_settings
+from ragrag import __version__
+from ragrag.config import find_index_root, get_settings
 
 
 _DESCRIPTION = (
@@ -126,7 +127,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.1.0",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "query",
@@ -203,12 +204,12 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
-    from src.embedding.colqwen_embedder import ColQwenEmbedder
-    from src.index.ingest_manager import IngestManager
-    from src.index.qdrant_store import QdrantStore, COLLECTION_NAME
-    from src.models import SearchRequest
-    from src.retrieval.result_formatter import format_as_json, format_as_markdown
-    from src.retrieval.search_engine import SearchEngine
+    from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+    from ragrag.index.ingest_manager import IngestManager
+    from ragrag.index.qdrant_store import QdrantStore, COLLECTION_NAME
+    from ragrag.models import SearchRequest
+    from ragrag.retrieval.result_formatter import format_as_json, format_as_markdown
+    from ragrag.retrieval.search_engine import SearchEngine
 
     # Configure logging to stderr only
     logging.basicConfig(

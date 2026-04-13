@@ -3,7 +3,7 @@
 Provides serialization and human-readable formatting for SearchResponse objects.
 """
 
-from src.models import SearchResponse
+from ragrag.models import SearchResponse
 
 
 def format_as_json(response: SearchResponse) -> str:

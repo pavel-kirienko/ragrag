@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.config import Settings
-from src.extractors.text_extractor import _chunk_text, _find_boundary, extract_text_segments
+from ragrag.config import Settings
+from ragrag.extractors.text_extractor import _chunk_text, _find_boundary, extract_text_segments
 
 
 def test_find_boundary_sentence_end() -> None:
