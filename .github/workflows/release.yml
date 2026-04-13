@@ -1,11 +1,14 @@
 name: Release
 
+# Release runs only after CI has succeeded on main. The version-tag-exists
+# check gates publishing, so pushes that don't bump `ragrag.__version__`
+# are cheap no-ops.
+
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    paths:
-      - "ragrag/__init__.py"
-      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 concurrency:
@@ -13,17 +16,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check:
-    name: Check for new version
+  release:
+    name: Publish release
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      should_release: ${{ steps.check.outputs.should_release }}
+    permissions:
+      contents: write
     steps:
+      - name: Resolve head SHA
+        id: sha
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.sha.outputs.sha }}
 
       - name: Read __version__
         id: version
@@ -32,106 +45,48 @@ jobs:
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           echo "Detected version: $ver"
 
-      - name: Check whether tag already exists
-        id: check
+      - name: Skip if tag already exists
+        id: gate
         run: |
           tag="v${{ steps.version.outputs.version }}"
           git fetch --tags --quiet
           if git rev-parse "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "Tag $tag already exists - no release needed."
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $tag already exists - nothing to release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "Tag $tag is new - releasing."
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
-    name: Build distribution
-    needs: check
-    if: needs.check.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.14"
 
-      - name: Install build tooling
-        run: pip install build
-
       - name: Build wheel and sdist
-        run: python -m build
-
-      - name: Show artifacts
-        run: ls -la dist/
-
-      - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-  publish:
-    name: Publish to PyPI
-    needs: [check, build]
-    if: needs.check.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          pip install build
+          python -m build
+          ls -la dist/
 
       - name: Publish to PyPI
+        if: steps.gate.outputs.skip != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
-  tag:
-    name: Push git tag
-    needs: [check, publish]
-    if: needs.check.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Create and push tag
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${VERSION}" -m "Release v${VERSION}"
-          git push origin "v${VERSION}"
-
-  release:
-    name: Create GitHub release
-    needs: [check, tag]
-    if: needs.check.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Create GitHub release
+      - name: Create git tag and GitHub release
+        if: steps.gate.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.check.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.sha.outputs.sha }}
         run: |
           gh release create "v${VERSION}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "v${VERSION}" \
-            --notes "Automated release for v${VERSION}. See commits on main for changes." \
+            --target "${SHA}" \
+            --notes "Automated release for v${VERSION}." \
             dist/*
