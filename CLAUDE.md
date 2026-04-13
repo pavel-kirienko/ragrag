@@ -2,6 +2,8 @@
 
 Ragrag is a local multimodal semantic search CLI for technical documentation (text, PDFs with diagrams, images). It uses late-interaction embeddings and vector search, running fully locally. Read README.md to understand the context.
 
+ALWAYS UPDATE AFFECTED DOCUMENTATION SOURCES WHEN THE IMPLEMENTATION IS ALTERED: THIS FILE, README.md, BUILT-IN HELP STRINGS, etc.
+
 ## Commands
 
 ```bash
