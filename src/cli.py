@@ -128,7 +128,11 @@ def main() -> int:
 
     try:
         logging.info("Initializing model '%s' (first run may take a long time)...", settings.model_id)
-        embedder = ColQwenEmbedder(settings.model_id, settings.max_visual_tokens)
+        embedder = ColQwenEmbedder(
+            settings.model_id,
+            settings.max_visual_tokens,
+            quantization=settings.quantization,
+        )
 
         logging.info("Opening local vector store...")
         store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)

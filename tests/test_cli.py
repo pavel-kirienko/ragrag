@@ -20,11 +20,17 @@ class MockEmbedder:
     def embed_text_chunk(self, text: str):
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
 
+    def embed_text_chunks(self, texts):
+        return [self.embed_text_chunk(t) for t in texts]
+
     def embed_query_text(self, query: str):
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
 
     def embed_image(self, image):
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
+
+    def embed_images(self, images):
+        return [self.embed_image(img) for img in images]
 
 
 def _make_mock_response(status: str = "complete") -> SearchResponse:
@@ -206,6 +212,6 @@ def test_main_model_and_top_k_overrides(monkeypatch: pytest.MonkeyPatch, tmp_pat
         result = main()
 
     assert result == 0
-    mock_embedder_cls.assert_called_once_with("my/model", 16384)
+    mock_embedder_cls.assert_called_once_with("my/model", 16384, quantization="auto")
     request = mock_engine_cls.return_value.search.call_args.args[0]
     assert request.top_k == 7

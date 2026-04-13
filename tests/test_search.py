@@ -17,6 +17,9 @@ class MockEmbedder:
         _ = text
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
 
+    def embed_text_chunks(self, texts):
+        return [self.embed_text_chunk(t) for t in texts]
+
     def embed_query_text(self, query: str):
         _ = query
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
@@ -24,6 +27,9 @@ class MockEmbedder:
     def embed_image(self, image):
         _ = image
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
+
+    def embed_images(self, images):
+        return [self.embed_image(img) for img in images]
 
 
 def _build_engine(tmp_path: Path, *, embedder: MockEmbedder | None = None) -> tuple[SearchEngine, IngestManager]:

@@ -56,23 +56,8 @@ class IngestManager:
                     raise ValueError("unsupported file type")
 
                 segments, images = self._extract_segments(file_path, file_type)
-
-                image_index = 0
-                for segment in segments:
-                    if segment.modality == Modality.TEXT:
-                        vector = self.embedder.embed_text_chunk(segment.excerpt)
-                    elif segment.modality == Modality.IMAGE:
-                        if image_index >= len(images):
-                            raise ValueError("missing image for image-modality segment")
-                        vector = self.embedder.embed_image(images[image_index])
-                        image_index += 1
-                    else:
-                        raise ValueError(f"unsupported modality: {segment.modality}")
-
-                    self.store.upsert(segment, vector)
-
-                if image_index != len(images):
-                    raise ValueError("image list does not match image-modality segments")
+                vectors = self._embed_segments(segments, images)
+                self.store.upsert_many(list(zip(segments, vectors)))
 
                 self.file_tracker.mark_indexed(
                     file_path,
@@ -102,6 +87,61 @@ class IngestManager:
                 stats.files_skipped_unchanged, stats.files_added, stats.files_updated,
             )
         return stats, discovery_skipped + per_file_skipped, file_paths
+
+    def _embed_segments(
+        self,
+        segments: list[Segment],
+        images: list[Image.Image],
+    ) -> list:
+        """Embed a file's segments, batching text and keeping images single.
+
+        Text is batched by ``settings.text_batch_size``. On any batch failure we
+        fall back to per-item embedding so a single bad chunk doesn't poison an
+        otherwise-valid file; per-item failures bubble up to the caller and fail
+        the file as they did before.
+
+        Images are embedded one at a time on this 8 GB GPU tier — batching
+        images risks OOM during indexing for little gain (see plan rationale).
+        The ``image_index`` invariant is preserved: IMAGE segments consume the
+        ``images`` list in emitted order.
+        """
+        vectors: list = [None] * len(segments)
+
+        text_indices = [i for i, s in enumerate(segments) if s.modality == Modality.TEXT]
+        batch_size = max(1, int(self.settings.text_batch_size))
+        for start in range(0, len(text_indices), batch_size):
+            group = text_indices[start : start + batch_size]
+            group_texts = [segments[i].excerpt for i in group]
+            try:
+                group_vecs = self.embedder.embed_text_chunks(group_texts)
+            except Exception as exc:
+                logger.warning(
+                    "Batched text embed of %d chunks failed (%s); retrying singles",
+                    len(group_texts), exc,
+                )
+                group_vecs = [self.embedder.embed_text_chunk(t) for t in group_texts]
+            for idx, vec in zip(group, group_vecs):
+                vectors[idx] = vec
+
+        image_index = 0
+        for i, segment in enumerate(segments):
+            if segment.modality == Modality.TEXT:
+                continue
+            if segment.modality == Modality.IMAGE:
+                if image_index >= len(images):
+                    raise ValueError("missing image for image-modality segment")
+                vectors[i] = self.embedder.embed_image(images[image_index])
+                image_index += 1
+            else:
+                raise ValueError(f"unsupported modality: {segment.modality}")
+
+        if image_index != len(images):
+            raise ValueError("image list does not match image-modality segments")
+
+        for i, v in enumerate(vectors):
+            if v is None:
+                raise ValueError(f"embedding missing for segment at index {i}")
+        return vectors
 
     def _extract_segments(
         self, file_path: str, file_type: FileType

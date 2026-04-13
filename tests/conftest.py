@@ -8,13 +8,17 @@ from typing import Any, cast
 class _TestEmbedder:
     embedding_dim: int = 4
 
-    def __init__(self, model_id: str, max_visual_tokens: int = 16384) -> None:
+    def __init__(self, model_id: str, max_visual_tokens: int = 16384, quantization: str = "auto") -> None:
         _ = model_id
         _ = max_visual_tokens
+        _ = quantization
 
     def embed_text_chunk(self, text: str):
         _ = text
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
+
+    def embed_text_chunks(self, texts):
+        return [self.embed_text_chunk(t) for t in texts]
 
     def embed_query_text(self, query: str):
         _ = query
@@ -23,6 +27,9 @@ class _TestEmbedder:
     def embed_image(self, image: object):
         _ = image
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
+
+    def embed_images(self, images):
+        return [self.embed_image(img) for img in images]
 
 
 def _detect_device() -> str:

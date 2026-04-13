@@ -22,6 +22,9 @@ class MockEmbedder:
         _ = text
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
 
+    def embed_text_chunks(self, texts):
+        return [self.embed_text_chunk(t) for t in texts]
+
     def embed_query_text(self, query: str):
         _ = query
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
@@ -29,6 +32,9 @@ class MockEmbedder:
     def embed_image(self, image: object):
         _ = image
         return [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]]
+
+    def embed_images(self, images):
+        return [self.embed_image(img) for img in images]
 
 
 def _build_manager(tmp_path: Path, *, indexing_timeout: float = 100000.0) -> IngestManager:
@@ -156,6 +162,85 @@ def test_ingest_multiple_files(tmp_path: Path) -> None:
 
     assert stats.files_added == 3
     assert skipped == []
+
+
+class CountingEmbedder(MockEmbedder):
+    """Records every batch size it's asked to embed, for test observation."""
+
+    def __init__(self) -> None:
+        self.text_batches: list[int] = []
+        self.single_calls: int = 0
+        self.raise_next_batch: bool = False
+
+    def embed_text_chunk(self, text: str):
+        self.single_calls += 1
+        return super().embed_text_chunk(text)
+
+    def embed_text_chunks(self, texts):
+        if self.raise_next_batch:
+            self.raise_next_batch = False
+            raise RuntimeError("simulated batch failure")
+        self.text_batches.append(len(texts))
+        return [super(CountingEmbedder, self).embed_text_chunk(t) for t in texts]
+
+
+def _build_manager_with_embedder(
+    tmp_path: Path, embedder: MockEmbedder, *, text_batch_size: int = 8,
+) -> IngestManager:
+    index_path = tmp_path / ".ragrag"
+    index_path.mkdir(parents=True, exist_ok=True)
+    settings = Settings(index_path=str(index_path), text_batch_size=text_batch_size)
+    store = QdrantStore(
+        path=str(index_path),
+        collection_name=f"ingest_test_{uuid.uuid4().hex}",
+        embedding_dim=4,
+    )
+    return IngestManager(cast(Any, embedder), store, settings)
+
+
+def test_ingest_batches_text_chunks(tmp_path: Path) -> None:
+    """Many text chunks collapse into full-sized batches plus a tail."""
+    # Craft content that will chunk into ~17 segments at chunk_size=200.
+    content = ("paragraph with several reasonable-length words in it. " * 2 + "\n\n") * 30
+    text_file = tmp_path / "batched.md"
+    _ = text_file.write_text(content, encoding="utf-8")
+
+    embedder = CountingEmbedder()
+    manager = _build_manager_with_embedder(tmp_path, embedder, text_batch_size=8)
+    # Force the chunker to produce many small chunks
+    manager.settings = manager.settings.model_copy(update={"chunk_size": 200, "chunk_overlap": 0, "text_batch_size": 8})
+
+    stats, skipped, _ = manager.ingest_paths([str(text_file)])
+
+    assert stats.files_added == 1
+    assert skipped == []
+    assert embedder.text_batches, "batched path was never called"
+    assert all(b <= 8 for b in embedder.text_batches)
+    assert sum(embedder.text_batches) >= 10, f"expected many chunks, got {embedder.text_batches}"
+    # More than one batch call means the full-size-then-tail split happened.
+    assert len(embedder.text_batches) >= 2
+
+
+def test_ingest_falls_back_to_singles_on_batch_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """If a text batch raises, the file still indexes via per-item singles."""
+    text_file = tmp_path / "fallback.txt"
+    _ = text_file.write_text(_long_text(), encoding="utf-8")
+
+    embedder = CountingEmbedder()
+    embedder.raise_next_batch = True
+    manager = _build_manager_with_embedder(tmp_path, embedder)
+
+    with caplog.at_level(logging.WARNING, logger="src.index.ingest_manager"):
+        stats, skipped, _ = manager.ingest_paths([str(text_file)])
+
+    assert stats.files_added == 1
+    assert skipped == []
+    assert embedder.single_calls > 0, "fallback to singles never happened"
+    assert any(
+        "retrying singles" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_extract_segments_text(tmp_path: Path) -> None:

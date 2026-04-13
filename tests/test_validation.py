@@ -47,7 +47,7 @@ def test_config_defaults() -> None:
     assert settings.index_path == ".ragrag"
     assert settings.include_hidden is False
     assert settings.follow_symlinks is True
-    assert settings.pdf_dpi == 200
+    assert settings.pdf_dpi == 250
     assert settings.ocr_threshold == 50
     assert settings.chunk_size == 900
     assert settings.chunk_overlap == 200

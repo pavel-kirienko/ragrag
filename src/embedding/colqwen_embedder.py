@@ -20,8 +20,40 @@ def _detect_device() -> str:
     return "cpu"
 
 
+def _resolve_quantization(setting: str, device: str) -> str:
+    """Resolve a quantization setting to a concrete strategy.
+
+    Returns one of: 'none', '8bit', '4bit'. 'auto' picks based on free VRAM:
+    a 4 B vision-language model with high visual-token budget needs roughly
+    ~5 GiB free for 4-bit, ~7 GiB for 8-bit, and ~11 GiB for bf16 once
+    activations are accounted for.
+    """
+    s = (setting or "auto").lower()
+    if s == "auto":
+        if device != "cuda":
+            return "none"
+        try:
+            free_mib = torch.cuda.mem_get_info(0)[0] // 1024**2
+        except Exception:
+            return "8bit"
+        if free_mib >= 12 * 1024:
+            return "none"
+        if free_mib >= 7 * 1024:
+            return "8bit"
+        return "4bit"
+    if s in {"none", "8bit", "4bit"}:
+        return s
+    logger.warning("Unknown quantization '%s', falling back to 'none'", setting)
+    return "none"
+
+
 class ColQwenEmbedder:
-    def __init__(self, model_id: str, max_visual_tokens: int = 16384):
+    def __init__(
+        self,
+        model_id: str,
+        max_visual_tokens: int = 16384,
+        quantization: str = "auto",
+    ):
         """Load model and processor. Takes ~2-5 min on CPU with swap."""
         t0 = time.time()
         _cached = try_to_load_from_cache(model_id, "config.json")
@@ -47,25 +79,66 @@ class ColQwenEmbedder:
 
         device = _detect_device()
         dtype = torch.float16 if device == "mps" else torch.bfloat16
+        quant = _resolve_quantization(quantization, device)
+        logger.info("Embedder device=%s quantization=%s", device, quant)
+
+        bnb_config = None
+        if quant in {"8bit", "4bit"} and device == "cuda":
+            try:
+                from transformers import BitsAndBytesConfig
+                if quant == "8bit":
+                    bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+                else:
+                    bnb_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_use_double_quant=True,
+                    )
+            except ImportError:
+                logger.warning("bitsandbytes not available; disabling quantization")
+                quant = "none"
 
         def _load_model(local_files_only: bool):
             try:
                 kwargs = dict(
-                    dtype=dtype,
                     attn_implementation="sdpa",
                     trust_remote_code=True,
                     local_files_only=local_files_only,
                 )
+                if bnb_config is not None:
+                    # bitsandbytes manages dtype internally; passing dtype here
+                    # would conflict with the quantization config.
+                    kwargs["quantization_config"] = bnb_config
+                else:
+                    kwargs["dtype"] = dtype
+
                 if device == "mps":
                     model = AutoModel.from_pretrained(model_id, **kwargs).eval().to("mps")
+                elif device == "cuda":
+                    # device_map="auto" lets accelerate spill layers that don't fit
+                    # in VRAM onto CPU/disk instead of OOMing. On a small GPU this is
+                    # the difference between partial GPU acceleration and pure CPU.
+                    free_vram_mib = torch.cuda.mem_get_info(0)[0] // 1024**2
+                    max_mem_mib = max(free_vram_mib - 512, 1024)
+                    model = AutoModel.from_pretrained(
+                        model_id,
+                        device_map="auto",
+                        max_memory={0: f"{max_mem_mib}MiB", "cpu": "24GiB"},
+                        **kwargs,
+                    ).eval()
                 else:
                     model = AutoModel.from_pretrained(model_id, device_map=device, **kwargs).eval()
                 return model
             except torch.cuda.OutOfMemoryError:
                 logger.warning("GPU out of memory, falling back to CPU")
+                # Release any partial GPU allocation from the failed load before
+                # retrying on CPU, otherwise VRAM stays pinned for the session.
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
                 return AutoModel.from_pretrained(
                     model_id,
-                    torch_dtype=torch.bfloat16,
+                    dtype=torch.bfloat16,
                     attn_implementation="sdpa",
                     trust_remote_code=True,
                     device_map="cpu",
@@ -85,35 +158,60 @@ class ColQwenEmbedder:
         logger.info(f"Model loaded on device: {self.device}")
         logger.info(f"Model loaded in {time.time() - t0:.1f}s")
 
-    def _embed_text(self, text: str) -> MultiVector:
-        t0 = time.time()
-        batch = self.processor.process_texts(texts=[text])
+    def _forward(self, batch: dict) -> list[MultiVector]:
+        """Run one forward pass and return per-item MultiVectors (padding removed).
+
+        ColQwen3's text processor left-pads the batch, so the "real" tokens for
+        a shorter item live in the tail of the sequence. We select by attention
+        mask instead of slicing by length, which handles left- or right-padded
+        inputs identically and is byte-for-byte equivalent to the legacy
+        single-item path for batches of size 1.
+        """
         batch = {k: v.to(self.device) for k, v in batch.items()}
         with torch.inference_mode():
             out = self.model(**batch)
-        # out.embeddings: (1, seq_len, 320), L2-normalized
-        result = out.embeddings[0].to(device="cpu", dtype=torch.float32).tolist()
-        logger.debug(f"Text embed: {len(result)} tokens in {time.time() - t0:.2f}s")
-        return result
+        embeddings = out.embeddings
+        attn = batch.get("attention_mask")
+        results: list[MultiVector] = []
+        for i in range(embeddings.shape[0]):
+            if attn is not None:
+                row_tensor = embeddings[i][attn[i].bool()]
+            else:
+                row_tensor = embeddings[i]
+            results.append(row_tensor.to(device="cpu", dtype=torch.float32).tolist())
+        return results
+
+    def embed_text_chunks(self, texts: list[str]) -> list[MultiVector]:
+        """Embed a list of text chunks in a single forward pass."""
+        if not texts:
+            return []
+        t0 = time.time()
+        batch = self.processor.process_texts(texts=list(texts))
+        vectors = self._forward(batch)
+        logger.debug("Text batch: %d items in %.2fs", len(vectors), time.time() - t0)
+        return vectors
+
+    def embed_images(self, images: list[Image.Image]) -> list[MultiVector]:
+        """Embed a list of images in a single forward pass."""
+        if not images:
+            return []
+        t0 = time.time()
+        batch = self.processor.process_images(images=list(images))
+        vectors = self._forward(batch)
+        logger.debug("Image batch: %d items in %.2fs", len(vectors), time.time() - t0)
+        return vectors
 
     def embed_query_text(self, query: str) -> MultiVector:
-        """Embed a search query into multivector. Uses process_texts()."""
-        return self._embed_text(query)
+        """Embed a search query into multivector."""
+        return self.embed_text_chunks([query])[0]
 
     def embed_text_chunk(self, text: str) -> MultiVector:
-        """Embed a text document chunk into multivector. Uses process_texts()."""
-        return self._embed_text(text)
+        """Embed a single text document chunk into multivector."""
+        return self.embed_text_chunks([text])[0]
 
     def embed_image(self, image: Image.Image) -> MultiVector:
-        """Embed an image into multivector. Uses process_images()."""
-        t0 = time.time()
-        batch = self.processor.process_images(images=[image])
-        batch = {k: v.to(self.device) for k, v in batch.items()}
-        with torch.inference_mode():
-            out = self.model(**batch)
-        result = out.embeddings[0].to(device="cpu", dtype=torch.float32).tolist()
-        logger.debug(f"Image embed: {len(result)} tokens in {time.time() - t0:.2f}s")
-        return result
+        """Embed a single image into multivector."""
+        return self.embed_images([image])[0]
 
     @property
     def embedding_dim(self) -> int:

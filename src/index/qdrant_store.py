@@ -56,21 +56,22 @@ class QdrantStore:
             )
 
     def upsert(self, segment: Segment, vector: MultiVector) -> None:
-        """Insert or update a segment with its multivector embedding.
+        """Insert or update a single segment with its multivector embedding."""
+        self.upsert_many([(segment, vector)])
 
-        Args:
-            segment: The Segment metadata to store as payload.
-            vector: The multivector embedding (list of token vectors).
-        """
-        payload = segment.model_dump()
+    def upsert_many(self, pairs: list[tuple[Segment, MultiVector]]) -> None:
+        """Insert or update multiple segments in a single Qdrant call."""
+        if not pairs:
+            return
         self.client.upsert(
             collection_name=self.collection_name,
             points=[
                 PointStruct(
                     id=segment.segment_id,
                     vector=vector,
-                    payload=payload,
+                    payload=segment.model_dump(),
                 )
+                for segment, vector in pairs
             ],
         )
 

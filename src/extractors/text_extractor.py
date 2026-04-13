@@ -34,17 +34,11 @@ def extract_text_segments(path: str, settings: Settings) -> list[Segment]:
         logger.warning(f"Failed to read {path}: {e}")
         return []
     
-    # Handle empty files
     if not content:
         return []
-    
-    # Split into lines for line tracking
-    lines = content.split('\n')
-    
-    # Chunk the content
+
     chunks = _chunk_text(
         content,
-        lines,
         target_chars=settings.chunk_size,
         overlap_chars=settings.chunk_overlap,
     )
@@ -68,60 +62,46 @@ def extract_text_segments(path: str, settings: Settings) -> list[Segment]:
 
 def _chunk_text(
     content: str,
-    lines: list[str],
     target_chars: int,
     overlap_chars: int,
 ) -> list[tuple[str, int, int]]:
     """Split text into chunks with overlap, respecting boundaries.
-    
-    Args:
-        content: Full text content.
-        lines: List of lines (split by '\n'). Used for line tracking.
-        target_chars: Target chunk size in characters.
-        overlap_chars: Overlap size in characters.
-    
-    Returns:
-        List of (chunk_text, start_line, end_line) tuples.
-        start_line and end_line are 1-indexed.
+
+    Returns (chunk_text, start_line, end_line) tuples with 1-indexed lines.
     """
     if not content:
         return []
-    
-    chunks = []
-    pos = 0  # Current position in content
-    line_pos = 0  # Current line index
-    
+
+    chunks: list[tuple[str, int, int]] = []
+    pos = 0
+
     while pos < len(content):
-        # Find chunk end
         chunk_end = min(pos + target_chars, len(content))
-        
-        # Try to find a good boundary
+
         boundary_pos = _find_boundary(content, pos, chunk_end)
-        
         if boundary_pos is None:
-            # No boundary found, use target end
             boundary_pos = chunk_end
-        
-        # Extract chunk
+
         chunk_text = content[pos:boundary_pos]
-        
-        # Count lines in this chunk
-        chunk_lines = chunk_text.count('\n')
-        start_line = line_pos + 1  # 1-indexed
-        end_line = line_pos + chunk_lines + 1
-        
+        start_line = content.count('\n', 0, pos) + 1
+        end_line = start_line + chunk_text.count('\n')
         chunks.append((chunk_text, start_line, end_line))
-        
-        # Move position forward
-        pos = boundary_pos
-        
-        # Update line position
-        line_pos += chunk_lines
-        
-        # Avoid infinite loop on very small chunks
-        if pos >= len(content):
+
+        if boundary_pos >= len(content):
             break
-    
+
+        # Back up `overlap_chars` behind the boundary for the next window.
+        # If that would land at or before the current start (which happens
+        # when overlap >= chunk length, typical near end-of-file), drop the
+        # overlap for this step and just advance past the emitted chunk —
+        # that keeps iterations monotone and guarantees termination.
+        next_pos = boundary_pos - overlap_chars
+        if next_pos <= pos:
+            next_pos = boundary_pos
+        if next_pos >= len(content):
+            break
+        pos = next_pos
+
     return chunks
 
 
@@ -139,31 +119,14 @@ def _find_boundary(content: str, start: int, end: int) -> int | None:
         Position to split at, or None if no boundary found.
     """
     search_region = content[start:end]
-    
-    # 1. Try blank lines (double newline)
-    blank_match = re.search(r'\n\s*\n', search_region[::-1])
-    if blank_match:
-        # Found blank line, split after it
-        pos_in_region = len(search_region) - blank_match.start()
-        return start + pos_in_region
-    
-    # 2. Try headings (lines starting with #)
-    heading_match = re.search(r'\n#+\s', search_region[::-1])
-    if heading_match:
-        pos_in_region = len(search_region) - heading_match.start()
-        return start + pos_in_region
-    
-    # 3. Try sentence boundaries (., !, ?)
-    sentence_match = re.search(r'[.!?]\s+', search_region[::-1])
-    if sentence_match:
-        pos_in_region = len(search_region) - sentence_match.start()
-        return start + pos_in_region
-    
-    # 4. Try word boundaries (space)
-    word_match = re.search(r'\s+', search_region[::-1])
-    if word_match:
-        pos_in_region = len(search_region) - word_match.start()
-        return start + pos_in_region
-    
-    # No boundary found
+
+    # In precedence order: blank line, markdown heading start, sentence end, word break.
+    # For each, find the rightmost match and return the position right after it.
+    for pattern in (r'\n\s*\n', r'\n#+\s', r'[.!?]\s+', r'\s+'):
+        last_end = -1
+        for m in re.finditer(pattern, search_region):
+            last_end = m.end()
+        if last_end > 0:
+            return start + last_end
+
     return None

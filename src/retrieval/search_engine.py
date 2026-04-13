@@ -30,6 +30,29 @@ if TYPE_CHECKING:
     from src.index.ingest_manager import IngestManager
 
 
+def _resolve_filter_paths(request_paths: list[str], indexed_paths: list[str]) -> list[str]:
+    """Turn request paths (which may be directories) into the flat list of file
+    paths used by Qdrant's MatchAny filter.
+
+    Qdrant's MatchAny is exact-string on the payload, so a directory entry would
+    never match the per-file `path` payload. We expand directories by intersecting
+    with the concrete file paths returned by the ingest phase and fall back to
+    exact matches for request paths that point at a single file.
+    """
+    resolved_requests = [os.path.realpath(os.path.abspath(p)) for p in request_paths]
+    resolved_indexed = [os.path.realpath(os.path.abspath(p)) for p in indexed_paths]
+    out: set[str] = set()
+    for req in resolved_requests:
+        if os.path.isfile(req):
+            out.add(req)
+            continue
+        prefix = req.rstrip(os.sep) + os.sep
+        for f in resolved_indexed:
+            if f == req or f.startswith(prefix):
+                out.add(f)
+    return sorted(out)
+
+
 class SearchEngine:
     """Synchronous search engine that coordinates indexing and retrieval."""
 
@@ -54,6 +77,7 @@ class SearchEngine:
         # Phase 1: Indexing
         # ------------------------------------------------------------------
         t0 = time.time()
+        indexed_paths: list[str] = []
         try:
             stats, skipped, indexed_paths = self.ingest_manager.ingest_paths(request.paths)
         except Exception as exc:  # noqa: BLE001
@@ -91,7 +115,7 @@ class SearchEngine:
         # ------------------------------------------------------------------
         t0 = time.time()
         try:
-            filter_paths = [os.path.realpath(os.path.abspath(p)) for p in request.paths]
+            filter_paths = _resolve_filter_paths(request.paths, indexed_paths)
             scored_points = self.store.search(query_vec, top_k=request.top_k, path_filter=filter_paths)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"Retrieval error: {exc}")

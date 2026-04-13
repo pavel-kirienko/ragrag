@@ -21,18 +21,28 @@ class Settings(BaseModel):
     # Embedding model
     model_id: str = Field(default="TomoroAI/tomoro-colqwen3-embed-4b", description="HuggingFace model ID.")
     max_visual_tokens: int = Field(default=16384, description="Max visual tokens per image.")
+    quantization: str = Field(
+        default="auto",
+        description="GPU weight quantization: 'auto' (8-bit on CUDA), 'none', '8bit', '4bit'.",
+    )
 
     # Search
     top_k: int = Field(default=10, description="Default number of results.")
     max_top_k: int = Field(default=50, description="Maximum allowed top_k.")
 
     # PDF extraction
-    pdf_dpi: int = Field(default=200, description="DPI for PDF page rendering.")
+    pdf_dpi: int = Field(default=250, description="DPI for PDF page rendering.")
     ocr_threshold: int = Field(default=50, description="Min chars before OCR fallback skipped.")
 
     # Text chunking
     chunk_size: int = Field(default=900, description="Target chunk size in characters.")
     chunk_overlap: int = Field(default=200, description="Overlap between chunks in characters.")
+
+    # Embedding batching
+    text_batch_size: int = Field(
+        default=8, ge=1, le=64,
+        description="Number of text chunks embedded per forward pass.",
+    )
 
     # Filesystem
     include_hidden: bool = Field(default=False, description="Include hidden files/dirs.")
