@@ -13,6 +13,16 @@ from typing import Any, cast
 os.environ.setdefault("RAGRAG_NO_DAEMON", "1")
 
 
+# Add a per-test timeout safety net so a misbehaving thread can't stall the
+# whole suite while waiting on a 7200 s client.recv. Individual tests can
+# override via ``@pytest.mark.timeout(...)``.
+def pytest_collection_modifyitems(config, items):  # noqa: D401
+    import pytest as _pytest
+    for item in items:
+        if "timeout" not in item.keywords:
+            item.add_marker(_pytest.mark.timeout(60))
+
+
 class _TestEmbedder:
     embedding_dim: int = 4
 

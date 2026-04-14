@@ -49,10 +49,58 @@ class FileState(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Segment (§7.2) — one indexable unit of content
+# Segment (legacy compat shim) and Chunk (the new indexable unit)
 # ---------------------------------------------------------------------------
 
+class ChunkKind(str, Enum):
+    """Kind of indexable unit. Determines how the chunk's references are
+    interpreted at retrieval time and which page-cache lookups apply."""
+
+    PDF_TOPIC = "pdf_topic"
+    TEXT_TOPIC = "text_topic"
+    IMAGE = "image"
+
+
+class Chunk(BaseModel):
+    """One topic, the new indexable unit.
+
+    A chunk is a *semantic view* over its source file: it points at the
+    pages or line ranges that belong to one topic, and it may overlap with
+    other chunks (a single page can belong to multiple topics, a single
+    text region can belong to multiple chunks). Chunk references need not
+    be contiguous — a topic can span pages 1–3 and 15–17 if the VLM
+    decided that's how the material is organised.
+
+    A chunk is stored as **two points** in the vector store: one for the
+    text modality and one for the visual modality. Both points carry the
+    same ``chunk_id`` in their payload; search-time rollup dedupes on it
+    so a topic appears at most once in the final top-k.
+    """
+
+    chunk_id: str                                   # UUID4
+    path: str                                       # absolute path to the source file
+    file_sha256: str
+    kind: ChunkKind
+    title: str                                      # VLM-supplied title or filename
+    summary: str = ""                               # VLM-supplied 1-sentence summary
+
+    # PDF topics ------------------------------------------------------- #
+    page_refs: list[int] = Field(default_factory=list)
+    hero_page: Optional[int] = None                 # representative page for reranker prompts
+
+    # Text topics ------------------------------------------------------ #
+    line_ranges: list[tuple[int, int]] = Field(default_factory=list)
+    byte_ranges: list[tuple[int, int]] = Field(default_factory=list)
+
+    # Common ----------------------------------------------------------- #
+    excerpt: str = ""                               # short representative snippet for display
+    order_key: int = 0                              # monotone, used for prev/next navigation
+
+
 class Segment(BaseModel):
+    """Legacy segment type. Kept as a compat shim for tests that still
+    construct it directly. New code uses :class:`Chunk`."""
+
     segment_id: str
     path: str
     file_type: FileType
@@ -85,16 +133,51 @@ class SkippedFile(BaseModel):
     reason: str
 
 
+class PageContext(BaseModel):
+    """One rendered PDF page attached to a search result."""
+
+    page: int
+    page_image_path: Optional[str] = None
+    page_image_b64: Optional[str] = None
+    text: str = ""
+
+
+class Location(BaseModel):
+    """Filesystem locator for a search-result hit.
+
+    Replaces the related-document graph from earlier plan revisions: just
+    tells the LLM consumer where the file lives and what else is in the
+    same directory, with no attempt to be clever about cross-document
+    relations.
+    """
+
+    path: str
+    directory: str
+    directory_listing: list[str] = Field(default_factory=list)
+    listing_truncated: bool = False
+    listing_total: int = 0
+
+
 class SearchResult(BaseModel):
     rank: int
     score: float
     path: str
     file_type: str
     modality: str
-    page: Optional[int] = None
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
+    page: Optional[int] = None              # legacy: first PDF page if any
+    start_line: Optional[int] = None        # legacy: first text line range start
+    end_line: Optional[int] = None          # legacy: first text line range end
     excerpt: str
+
+    # New in Phase B (all optional so the legacy test fixtures still parse) #
+    chunk_id: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    page_refs: Optional[list[int]] = None
+    line_ranges: Optional[list[tuple[int, int]]] = None
+    context_pages: list[PageContext] = Field(default_factory=list)
+    location: Optional[Location] = None
+    rerank_reason: Optional[str] = None
 
 
 class TimingInfo(BaseModel):
