@@ -135,25 +135,55 @@ def run_ragrag(
     return resp, wall, proc.stderr[-2000:]
 
 
+def _result_pages(r: dict) -> list[int]:
+    """Return every page a result references.
+
+    Post-Phase-B results have ``page_refs`` (a list that may span
+    multiple, possibly non-contiguous pages); pre-Phase-B results
+    have a scalar ``page`` field. Tolerate both so the benchmark
+    keeps working across the upgrade.
+    """
+    refs = r.get("page_refs")
+    if isinstance(refs, list) and refs:
+        return [int(p) for p in refs if isinstance(p, int)]
+    p = r.get("page")
+    if isinstance(p, int):
+        return [p]
+    return []
+
+
 def grade(question: dict, response: dict, wall_s: float) -> dict:
     results = response.get("results", [])
     expected_lo, expected_hi = question["expected_pages"]
-    in_range = lambda p: p is not None and expected_lo <= p <= expected_hi
-    pages_top10 = [r.get("page") for r in results[:10]]
 
-    top1 = bool(results) and in_range(results[0].get("page"))
-    top5 = any(in_range(r.get("page")) for r in results[:5])
-    top10 = any(in_range(r.get("page")) for r in results[:10])
+    def in_range(pages: list[int]) -> bool:
+        return any(expected_lo <= p <= expected_hi for p in pages)
+
+    pages_top10 = [_result_pages(r) for r in results[:10]]
+
+    top1 = bool(results) and in_range(_result_pages(results[0]))
+    top5 = any(in_range(_result_pages(r)) for r in results[:5])
+    top10 = any(in_range(_result_pages(r)) for r in results[:10])
 
     mrr = 0.0
     for i, r in enumerate(results, start=1):
-        if in_range(r.get("page")):
+        if in_range(_result_pages(r)):
             mrr = 1.0 / i
             break
 
     must = [s.lower() for s in question["must_contain_any"]]
     excerpts5 = " ".join((r.get("excerpt") or "").lower() for r in results[:5])
-    semantic5 = any(s in excerpts5 for s in must)
+    # Phase B also provides title + summary on each result; count those
+    # as semantic-hit material too since a topic title is often the
+    # canonical keyword anchor.
+    semantic_corpus = excerpts5
+    for r in results[:5]:
+        semantic_corpus += " " + (r.get("title") or "").lower()
+        semantic_corpus += " " + (r.get("summary") or "").lower()
+    semantic5 = any(s in semantic_corpus for s in must)
+
+    top1_pages = _result_pages(results[0]) if results else []
+    distinct_pages = {p for page_list in pages_top10 for p in page_list}
 
     timing = response.get("timing_ms", {}) or {}
     return {
@@ -166,9 +196,10 @@ def grade(question: dict, response: dict, wall_s: float) -> dict:
         "top10": top10,
         "mrr": mrr,
         "semantic5": semantic5,
-        "distinct_pages_top10": len({p for p in pages_top10 if p is not None}),
+        "distinct_pages_top10": len(distinct_pages),
         "top1_modality": results[0].get("modality") if results else None,
-        "top1_page": results[0].get("page") if results else None,
+        "top1_pages": top1_pages,
+        "top1_title": results[0].get("title") if results else None,
         "top1_excerpt_head": (results[0].get("excerpt") or "")[:160] if results else "",
         "wall_s": round(wall_s, 3),
         "indexing_ms": int(timing.get("indexing_ms", 0)),
@@ -269,7 +300,13 @@ def main() -> int:
         if row["top5"]: verdict.append("top5")
         if row["semantic5"]: verdict.append("sem")
         verdict_s = ",".join(verdict) or "MISS"
-        print(f"    [{verdict_s}] page={row['top1_page']} mod={row['top1_modality']} mrr={row['mrr']:.2f} wall={row['wall_s']:.1f}s", flush=True)
+        pages_s = ",".join(str(p) for p in row["top1_pages"]) or "?"
+        title_s = row.get("top1_title") or "-"
+        print(
+            f"    [{verdict_s}] pages={pages_s} mod={row['top1_modality']} "
+            f"mrr={row['mrr']:.2f} wall={row['wall_s']:.1f}s title={title_s!r}",
+            flush=True,
+        )
         print(f"    excerpt: {row['top1_excerpt_head']!r}", flush=True)
 
     summary = summarize(rows, index_wall)
