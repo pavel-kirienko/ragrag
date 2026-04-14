@@ -84,26 +84,24 @@ class SubprocessVLMPlanner:
             "Spawning VLM topic worker for %d file(s): %s",
             len(request_files), " ".join(cmd),
         )
+        # Let the worker's stderr flow straight to the parent's stderr so
+        # the user sees live page-progress logs. Capture stdout because
+        # that is where the per-file JSON responses land.
         try:
             proc = subprocess.run(
                 cmd,
                 input=json.dumps(request),
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=None,
                 text=True,
                 check=False,
             )
         except FileNotFoundError as exc:
             raise SubprocessVLMPlannerError(f"python interpreter not found: {exc}") from exc
 
-        if proc.stderr:
-            for line in proc.stderr.splitlines():
-                if line.strip():
-                    logger.debug("vlm-worker: %s", line)
-
         if proc.returncode != 0:
             raise SubprocessVLMPlannerError(
-                f"VLM worker exited with code {proc.returncode}; "
-                f"stderr tail: {proc.stderr[-400:] if proc.stderr else '(none)'}"
+                f"VLM worker exited with code {proc.returncode}"
             )
 
         results: dict[str, Any] = {}

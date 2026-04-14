@@ -21,27 +21,35 @@ The `unit` nox session excludes `tests/test_e2e.py` and runs without needing the
 
 ## Architecture
 
-The pipeline is split into extraction → embedding → indexing → retrieval, orchestrated by the CLI.
+The pipeline is split into extraction → plan (VLM topic chunking) → embed → index → retrieval, orchestrated by the CLI or the daemon.
 
-- **`ragrag/cli.py`** — argparse CLI. Resolves config, constructs `SearchEngine`, prints JSON or Markdown. Logs go to stderr; results to stdout.
-- **`ragrag/config.py`** — `Settings` (pydantic) loaded from `ragrag.json`/`.ragrag.json`, walking up the directory tree. Also handles index root discovery (`.ragrag/`).
-- **`ragrag/path_discovery.py`** — walks input paths honoring `include_hidden`/`follow_symlinks`, classifies files via `ragrag/models.py:get_file_type` (text/PDF/image).
-- **`ragrag/file_state.py`** — `FileStateTracker` persists file mtime/hash under the index dir so unchanged files are skipped on re-ingest.
-- **`ragrag/extractors/`** — per-modality extraction:
-  - `text_extractor.py` chunks plain text using `chunk_size`/`chunk_overlap`.
-  - `pdf_extractor.py` renders PDF pages at `pdf_dpi`, extracts native text, and falls back to `ocr.py` (Tesseract) when page text is below `ocr_threshold`.
-  - `image_extractor.py` loads standalone images.
-- **`ragrag/embedding/colqwen_embedder.py`** — wraps the ColQwen3 model (`TomoroAI/tomoro-colqwen3-embed-4b` by default) and produces MultiVector (late-interaction) embeddings for both text and images. Respects `max_visual_tokens`. Metal/CPU/CUDA device selection lives here.
-- **`ragrag/index/qdrant_store.py`** — thin Qdrant wrapper using a local on-disk collection under `index_path`. Stores MultiVector points with payload metadata (source path, modality, page, chunk id).
-- **`ragrag/index/ingest_manager.py`** — drives discovery → extract → embed → upsert. Enforces `indexing_timeout` as a soft cap, emitting `SkippedFile` entries for anything deferred.
-- **`ragrag/retrieval/search_engine.py`** — the orchestrator: runs lazy ingest first, embeds the query, calls Qdrant MaxSim, returns `SearchResponse` with `TimingInfo` and indexing stats.
-- **`ragrag/retrieval/result_formatter.py`** — converts Qdrant `ScoredPoint`s into `SearchResult` objects for CLI output.
-- **`ragrag/models.py`** — shared pydantic models (`Segment`, `Modality`, `FileType`, `SearchRequest/Response/Result`, `IndexingStats`, `SkippedFile`, `TimingInfo`). This is the contract between layers; changes here ripple widely.
+- **`ragrag/cli.py`** — argparse CLI. Auto-spawns the daemon when available, falls back to in-process when not. Logs go to stderr; results to stdout. Sets `HF_HUB_OFFLINE=1` before importing torch.
+- **`ragrag/config.py`** — `Settings` (pydantic) loaded from `ragrag.json` / `.ragrag.json`, walking up the directory tree.
+- **`ragrag/path_discovery.py`**, **`ragrag/file_state.py`** — file enumeration + SHA-256 based staleness tracking under `<index>/file_state/`.
+- **`ragrag/extractors/pdf_extractor.py`** — renders pages at `pdf_dpi`, yields `(Segment, PIL.Image)` pairs, OCR fallback via `ocr.py` when page text is too short.
+- **`ragrag/extractors/vlm_topic_client.py`** — single shared VLM prompt/parser for PDF + text chunking. Compact one-level JSON schema used when `chunker_stride_pages == 1` (the default); the parser has a salvage path that recovers truncated JSON.
+- **`ragrag/extractors/vlm_topic_chunker.py`**, **`vlm_topic_segmenter.py`** — wrap the client to emit `Chunk` objects per file.
+- **`ragrag/extractors/vlm_topic_worker.py`** — **runs in a subprocess**. The parent process spawns `python -m ragrag.extractors.vlm_topic_worker`, pipes in a JSON request (list of files + settings), and reads JSON-Line chunks on stdout. The child loads the VLM, plans every requested file, and exits. Subprocess isolation is what keeps the embedder reliable on tight GPUs: `bnb` 4-bit leaves non-PyTorch CUDA context state behind after unload, and the only way to fully reclaim it is for the child process to exit.
+- **`ragrag/extractors/vlm_topic_subprocess.py`** — parent-side wrapper (`SubprocessVLMPlanner`) that `subprocess.run`s the worker.
+- **`ragrag/embedding/colqwen_embedder.py`** — ColQwen3 late-interaction embedder. Supports `defer_load=True` so the CLI can construct the handle before the plan phase and only load weights after the VLM subprocess exits. Uses `device_map={"": "cuda:0"}` to bypass accelerate's memory-based dispatch heuristic (which undercounts free VRAM on this GPU profile).
+- **`ragrag/embedding/vlm_loader.py`** — shared HF loader for any VLM. Auto-sets `HF_HUB_OFFLINE`, tries `local_files_only=True` first with a network-allowed fallback, and forces `attn_implementation="eager"` to sidestep cuDNN kernel-lookup failures with bnb-4bit compute-dtype combos.
+- **`ragrag/index/page_cache.py`** — `PageImageCache`: WebP-backed, SHA-addressed LRU at `<index>/page_cache/<sha[:2]>/<sha>/<page>.webp`.
+- **`ragrag/index/qdrant_store.py`** — thin Qdrant wrapper; variable-length multivectors via `offsets.bin`.
+- **`ragrag/index/ingest_manager.py`** — two-phase pipeline. **Plan phase**: route stale PDFs / text files to `SubprocessVLMPlanner` in one batch, collect `Chunk` objects. Images bypass the VLM. **Embed phase**: load ColQwen3 (fresh, clean CUDA context), embed per-chunk text + per-page images, upsert two points per chunk (text + image modalities) that share a `chunk_id`.
+- **`ragrag/retrieval/search_engine.py`** — orchestrator. Runs lazy ingest first, then embeds the query, does MaxSim retrieval, rolls up duplicate `chunk_id`s (text+image collapse into one result), attaches `Location` block + `context_pages` from the page cache.
+- **`ragrag/retrieval/location_builder.py`** — builds the `Location` payload: file path, containing directory, a directory listing (head/tail truncated via `location_directory_listing_max`). Respects `.gitignore` when `location_respect_gitignore=True`.
+- **`ragrag/retrieval/result_formatter.py`** — `json` / `compact-json` / `markdown` / `markdown-rich` output formats.
+- **`ragrag/daemon/server.py`** — long-lived JSON-RPC server over Unix socket + HTTP status server. Holds one `SearchEngine` per index.
+- **`ragrag/daemon/http_status.py`** + **`static.py`** — the bundled dashboard. Static HTML polls `/status` every 2 s. Also serves `/pages/<sha>/<n>.webp` from the engine's `PageImageCache` and a `POST /shutdown` gate.
+- **`ragrag/models.py`** — shared pydantic contracts: `Chunk`, `ChunkKind`, `PageContext`, `Location`, `SearchRequest/Response/Result`, `IndexingStats`, `SkippedFile`, `TimingInfo`.
 
 Update this section when the architecture is changed.
 
 ### Key cross-cutting behaviors
 
-- **Lazy index-on-demand**: every search call first runs `IngestManager.ingest_paths` so new/changed files are indexed before query embedding. Tests often mock the embedder to avoid this cost.
-- **Config resolution** is hierarchical (CWD up to root), and `index_path` in the config is resolved relative to the config file, not CWD. Tests covering this live in `tests/test_cli.py` and `tests/test_todo_cases.py`.
-- **Modalities are unified** in Qdrant under one collection — text chunks and rendered PDF page images share the vector space so a single query embedding retrieves both.
+- **Subprocess VLM isolation**: the VLM topic chunker runs in a child Python process. Do NOT try to re-introduce in-process unload/reload; bnb 4-bit fragmentation on shared CUDA contexts will break the embedder's forward pass. If you need to add another VLM use site (e.g. Phase D reranker), either piggy-back on the same worker protocol or spawn a second child.
+- **Deferred embedder load**: `ColQwenEmbedder(defer_load=True)` defers weight loading until `ensure_loaded()` is called. CLI and daemon use this so the VLM subprocess owns the CUDA context during the plan phase; the embedder only loads afterwards, in a pristine context.
+- **Lazy index-on-demand**: every search call first runs `IngestManager.ingest_paths` so new/changed files are indexed before query embedding. Tests often mock the embedder and the VLM factory to avoid this cost.
+- **Config resolution** is hierarchical (CWD up to root), and `index_path` in the config is resolved relative to the config file, not CWD.
+- **Chunks are topics, not pages**: one `Chunk` describes a semantic topic that may reference multiple pages (possibly non-contiguous) and may overlap with other chunks (a page can belong to more than one topic). Storage doubles each topic as a text point + an image point sharing a `chunk_id`; the search rollup re-unifies them.
+- **Modalities are unified** in Qdrant under one collection.
