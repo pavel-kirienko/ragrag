@@ -58,6 +58,15 @@ class Settings(BaseModel):
                     "tight GPUs (8 GB with bnb 4-bit weights); "
                     "truncating to ~800 tokens keeps retrieval stable.",
     )
+    embed_image_max_side: int = Field(
+        default=768, ge=256, le=2048,
+        description="Max image side (pixels) fed to the ColQwen3 image "
+                    "embedder. Full-resolution DPI-250 pages stay on "
+                    "disk for the page cache and the dashboard, but a "
+                    "thumbnail is plenty for retrieval and keeps the "
+                    "embedder's activation budget under the 8 GB "
+                    "ceiling on the reference card.",
+    )
 
     # VLM topic chunker (Phase B)
     vlm_model_id: str = Field(

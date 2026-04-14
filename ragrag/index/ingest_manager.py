@@ -531,12 +531,57 @@ class IngestManager:
         if not images:
             return None
 
-        parts: list[np.ndarray] = []
+        # Downscale each page image before feeding it to the embedder.
+        # The full-resolution DPI-250 render is preserved for the page
+        # cache and the dashboard, but it is too large for the bnb 4-bit
+        # ColQwen3 vision encoder on an 8 GB card — the forward-pass
+        # activations spill and the allocator fragments after a few
+        # dozen pages. A ~768 px thumbnail is plenty for retrieval and
+        # fits comfortably under the ~50 MiB headroom the embedder has.
+        max_side = int(getattr(self.settings, "embed_image_max_side", 768))
+        downscaled: list[Image.Image] = []
         for img in images:
+            try:
+                w, h = img.size
+                longest = max(w, h)
+                if longest > max_side:
+                    scale = max_side / float(longest)
+                    new_size = (
+                        max(1, int(round(w * scale))),
+                        max(1, int(round(h * scale))),
+                    )
+                    try:
+                        from PIL import Image as _PIL
+
+                        resample = _PIL.Resampling.LANCZOS
+                    except Exception:
+                        resample = None
+                    downscaled.append(
+                        img.resize(new_size, resample) if resample is not None
+                        else img.resize(new_size)
+                    )
+                else:
+                    downscaled.append(img)
+            except Exception:
+                downscaled.append(img)
+
+        parts: list[np.ndarray] = []
+        for img in downscaled:
             try:
                 vec = self.embedder.embed_image(img)
             except Exception as exc:
                 logger.warning("Image embed failed for chunk %s: %s", chunk.chunk_id, exc)
+                # Force torch to compact its allocator before the next
+                # attempt — image-embed OOMs cascade otherwise because
+                # each failed forward leaves reserved-but-unallocated
+                # blocks in the way of the next one.
+                try:
+                    import torch
+
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
                 continue
             if vec is None:
                 continue
