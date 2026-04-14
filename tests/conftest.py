@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
 from typing import Any, cast
+
+
+# Tests that exercise the CLI mock the in-process search engine directly via
+# patching internal classes. Auto-spawning the daemon would race those mocks
+# (and launch real subprocesses), so we hard-disable it for the whole suite.
+# Individual daemon tests opt back in by deleting this var.
+os.environ.setdefault("RAGRAG_NO_DAEMON", "1")
 
 
 class _TestEmbedder:

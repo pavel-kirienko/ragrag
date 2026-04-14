@@ -51,6 +51,24 @@ class Settings(BaseModel):
     # Timeouts
     indexing_timeout: float = Field(default=100000.0, description="Soft timeout for indexing in seconds.")
 
+    # Daemon
+    daemon_autostart: bool = Field(
+        default=True,
+        description="Auto-spawn the ragrag daemon from CLI calls when no socket is found.",
+    )
+    daemon_idle_timeout_s: float = Field(
+        default=12 * 3600,
+        description="Daemon exits after this many seconds of no requests. Default: 12 hours.",
+    )
+    daemon_status_host: str = Field(
+        default="127.0.0.1",
+        description="Bind host for the daemon's HTTP status server (Phase E).",
+    )
+    daemon_status_port: int = Field(
+        default=27272,
+        description="Initial port for the daemon's HTTP status server (Phase E). 0 = pick free.",
+    )
+
     model_config = {"extra": "ignore"}
 
 

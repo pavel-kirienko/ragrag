@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -196,24 +197,23 @@ def _build_parser() -> argparse.ArgumentParser:
             "stdout regardless of log level."
         ),
     )
+    parser.add_argument(
+        "--no-daemon",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the search engine in the current process instead of "
+            "auto-starting the ragrag daemon. Useful in sandboxed "
+            "environments and for debugging. Same effect as setting "
+            "RAGRAG_NO_DAEMON=1."
+        ),
+    )
     return parser
 
 
-def main() -> int:
-    """Entry point for the ragrag CLI. Returns exit code."""
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
-    from ragrag.index.ingest_manager import IngestManager
-    from ragrag.index.qdrant_store import QdrantStore, COLLECTION_NAME
-    from ragrag.models import SearchRequest
-    from ragrag.retrieval.result_formatter import format_as_json, format_as_markdown
-    from ragrag.retrieval.search_engine import SearchEngine
-
-    # Configure logging to stderr only
+def _setup_logging(level: str) -> None:
     logging.basicConfig(
-        level=getattr(logging, args.log_level),
+        level=getattr(logging, level),
         format="%(asctime)s %(levelname)s %(message)s",
         stream=sys.stderr,
         force=True,
@@ -221,7 +221,10 @@ def main() -> int:
     for noisy in ("transformers", "httpx", "urllib3", "qdrant_client", "huggingface_hub"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    print("ragrag: starting up...", file=sys.stderr, flush=True)
+
+def _resolve_settings(args) -> tuple[str, "Settings"]:  # noqa: F821
+    """Return (root_dir, settings) for the given CLI args."""
+    from ragrag.config import Settings  # noqa: F401  — for type only
 
     if args.new:
         root_dir = os.getcwd()
@@ -230,55 +233,195 @@ def main() -> int:
         os.makedirs(index_path, exist_ok=True)
         settings = settings.model_copy(update={"index_path": index_path})
     else:
-        _, settings = find_index_root()
-
-    logging.info("Using index path: %s", settings.index_path)
-
+        root_dir, settings = find_index_root()
     if args.model:
         settings = settings.model_copy(update={"model_id": args.model})
+    return root_dir, settings
+
+
+def _daemon_disabled(args) -> bool:
+    if getattr(args, "no_daemon", False):
+        return True
+    if os.environ.get("RAGRAG_NO_DAEMON"):
+        return True
+    return False
+
+
+def _run_via_daemon(args, settings) -> int | None:
+    """Try to run the query through the daemon. Returns exit code on success,
+    or ``None`` when the daemon path is unusable and the caller should fall back.
+    """
+    from ragrag.daemon.client import DaemonClient, DaemonError, DaemonStartupError
+
+    client = DaemonClient(settings.index_path)
+    try:
+        client.ensure_daemon()
+    except DaemonStartupError as exc:
+        logging.warning("Daemon unavailable (%s); falling back to in-process engine", exc)
+        return None
+    try:
+        result = client.search(
+            args.query,
+            paths=args.paths,
+            top_k=args.top_k if args.top_k is not None else settings.top_k,
+            include_markdown=args.output_markdown,
+        )
+    except DaemonError as exc:
+        logging.warning("Daemon RPC failed (%s); falling back to in-process engine", exc)
+        return None
+
+    # Print result. Daemon returns the same SearchResponse shape (dict).
+    if args.output_markdown:
+        from ragrag.models import SearchResponse
+        from ragrag.retrieval.result_formatter import format_as_markdown
+
+        try:
+            response = SearchResponse(**result)
+        except Exception:
+            print(json.dumps(result, indent=2))
+        else:
+            print(format_as_markdown(response))
+    else:
+        print(json.dumps(result, indent=2))
+
+    status = result.get("status") if isinstance(result, dict) else None
+    return 0 if status == "complete" else 1
+
+
+def _run_inprocess(args, settings) -> int:
+    """Original in-process search path. Used as fallback / explicit --no-daemon mode."""
+    from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+    from ragrag.index.ingest_manager import IngestManager
+    from ragrag.index.qdrant_store import QdrantStore, COLLECTION_NAME
+    from ragrag.models import SearchRequest
+    from ragrag.retrieval.result_formatter import format_as_json, format_as_markdown
+    from ragrag.retrieval.search_engine import SearchEngine
 
     top_k = args.top_k if args.top_k is not None else settings.top_k
     use_markdown = args.output_markdown
 
+    logging.info("Initializing model '%s' (first run may take a long time)...", settings.model_id)
+    embedder = ColQwenEmbedder(
+        settings.model_id,
+        settings.max_visual_tokens,
+        quantization=settings.quantization,
+    )
+
+    logging.info("Opening local vector store...")
+    store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
+    ingest_mgr = IngestManager(embedder, store, settings)
+    engine = SearchEngine(embedder, store, ingest_mgr, settings)
+
+    request = SearchRequest(
+        paths=args.paths,
+        query=args.query,
+        top_k=top_k,
+        include_markdown=use_markdown,
+    )
+
+    logging.info("Running indexing + search over %d path(s)...", len(args.paths))
+    response = engine.search(request)
+    logging.info(
+        "Search complete: status=%s results=%d added=%d updated=%d skipped_unchanged=%d",
+        response.status,
+        len(response.results),
+        response.indexed_now.files_added,
+        response.indexed_now.files_updated,
+        response.indexed_now.files_skipped_unchanged,
+    )
+
+    if use_markdown:
+        print(format_as_markdown(response))
+    else:
+        print(format_as_json(response))
+
+    return 0 if response.status == "complete" else 1
+
+
+def _run_daemon_subcommand(argv: list[str]) -> int:
+    """ragrag daemon … — start a daemon process. Delegates to ragrag.daemon.server.main."""
+    from ragrag.daemon.server import main as daemon_main
+
+    return daemon_main(argv)
+
+
+def _run_status_subcommand() -> int:
+    """ragrag status — print the daemon's /status JSON."""
+    from ragrag.daemon.client import DaemonClient, DaemonError, DaemonStartupError
+
     try:
-        logging.info("Initializing model '%s' (first run may take a long time)...", settings.model_id)
-        embedder = ColQwenEmbedder(
-            settings.model_id,
-            settings.max_visual_tokens,
-            quantization=settings.quantization,
-        )
+        root_dir, settings = find_index_root()
+    except SystemExit:
+        print("ragrag: no index found in this directory tree", file=sys.stderr)
+        return 1
+    client = DaemonClient(settings.index_path)
+    if not client.socket_path.exists():
+        print("ragrag: no daemon running for this index", file=sys.stderr)
+        return 1
+    try:
+        snapshot = client.status()
+    except DaemonError as exc:
+        print(f"ragrag: daemon error: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(snapshot, indent=2))
+    return 0
 
-        logging.info("Opening local vector store...")
-        store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
-        ingest_mgr = IngestManager(embedder, store, settings)
-        engine = SearchEngine(embedder, store, ingest_mgr, settings)
 
-        request = SearchRequest(
-            paths=args.paths,
-            query=args.query,
-            top_k=top_k,
-            include_markdown=use_markdown,
-        )
+def _run_shutdown_subcommand() -> int:
+    """ragrag shutdown — politely shut down the daemon for the current index."""
+    from ragrag.daemon.client import DaemonClient, DaemonError
 
-        logging.info("Running indexing + search over %d path(s)...", len(args.paths))
-        response = engine.search(request)
-        logging.info(
-            "Search complete: status=%s results=%d added=%d updated=%d skipped_unchanged=%d",
-            response.status,
-            len(response.results),
-            response.indexed_now.files_added,
-            response.indexed_now.files_updated,
-            response.indexed_now.files_skipped_unchanged,
-        )
+    try:
+        root_dir, settings = find_index_root()
+    except SystemExit:
+        print("ragrag: no index found in this directory tree", file=sys.stderr)
+        return 1
+    client = DaemonClient(settings.index_path)
+    if not client.socket_path.exists():
+        print("ragrag: no daemon running for this index", file=sys.stderr)
+        return 0
+    try:
+        client.shutdown()
+    except DaemonError as exc:
+        print(f"ragrag: daemon error: {exc}", file=sys.stderr)
+        return 1
+    print("ragrag: daemon shut down")
+    return 0
 
-        # Output to stdout
-        if use_markdown:
-            print(format_as_markdown(response))
-        else:
-            print(format_as_json(response))
 
-        return 0 if response.status == "complete" else 1
+def main() -> int:
+    """Entry point for the ragrag CLI. Returns exit code."""
+    # Sub-command dispatch (peeks at argv[1] before letting argparse parse the search form).
+    argv = sys.argv[1:]
+    if argv and argv[0] in {"daemon", "status", "shutdown"}:
+        sub, rest = argv[0], argv[1:]
+        # Minimal logging for sub-commands (the daemon configures its own logger).
+        if sub == "daemon":
+            return _run_daemon_subcommand(rest)
+        _setup_logging("WARNING")
+        if sub == "status":
+            return _run_status_subcommand()
+        if sub == "shutdown":
+            return _run_shutdown_subcommand()
 
+    parser = _build_parser()
+    args = parser.parse_args()
+    _setup_logging(args.log_level)
+
+    print("ragrag: starting up...", file=sys.stderr, flush=True)
+
+    try:
+        _root_dir, settings = _resolve_settings(args)
+    except SystemExit as exc:
+        return int(exc.code) if isinstance(exc.code, int) else 1
+    logging.info("Using index path: %s", settings.index_path)
+
+    try:
+        if not _daemon_disabled(args) and settings.daemon_autostart:
+            exit_code = _run_via_daemon(args, settings)
+            if exit_code is not None:
+                return exit_code
+        return _run_inprocess(args, settings)
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 1
