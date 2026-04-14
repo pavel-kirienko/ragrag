@@ -120,6 +120,10 @@ class SearchRequest(BaseModel):
     query: str = Field(..., description="Natural-language search query")
     top_k: int = Field(default=10, ge=1, le=50, description="Number of results")
     include_markdown: bool = Field(default=False, description="Include Markdown summary")
+    include_page_images: Optional[str] = Field(
+        default=None,
+        description="Page image delivery: 'none' | 'path' | 'base64'. Falls back to Settings.include_page_images_default.",
+    )
 
 
 class IndexingStats(BaseModel):

@@ -34,6 +34,7 @@ from ragrag.extractors.text_topic_segmenter import TextSegmenterError, TextTopic
 from ragrag.extractors.vlm_topic_chunker import VLMChunkerError, VLMTopicChunker
 from ragrag.extractors.vlm_topic_client import VLMTopicClient
 from ragrag.file_state import FileStateTracker
+from ragrag.index.page_cache import PageImageCache
 from ragrag.index.qdrant_store import QdrantStore
 from ragrag.models import (
     Chunk,
@@ -44,6 +45,9 @@ from ragrag.models import (
     get_file_type,
 )
 from ragrag.path_discovery import discover_files
+
+
+VLMFactory = Callable[[], VLMTopicClient]
 
 
 logger = logging.getLogger(__name__)
@@ -71,12 +75,27 @@ class IngestManager:
         store: QdrantStore,
         settings: Settings,
         vlm_client: Optional[VLMTopicClient] = None,
+        vlm_factory: Optional[VLMFactory] = None,
     ) -> None:
+        """One of ``vlm_client`` (already loaded, kept across calls) or
+        ``vlm_factory`` (called lazily each ``ingest_paths``) should be
+        provided; tests typically pass ``vlm_client`` with a stub, while the
+        daemon passes ``vlm_factory`` so the heavy model only sits in VRAM
+        for the duration of an actual indexing pass.
+        """
         self.embedder = embedder
         self.store = store
         self.settings = settings
         self.vlm_client = vlm_client
+        self._vlm_factory = vlm_factory
         self.file_tracker = FileStateTracker(settings.index_path)
+        # PDF pages rendered during the embed phase are mirrored to this cache
+        # so the search path can attach them to ``SearchResult.context_pages``.
+        import os as _os
+        self.page_cache = PageImageCache(
+            _os.path.join(settings.index_path, "page_cache"),
+            max_mb=int(getattr(settings, "page_cache_max_mb", 1024)),
+        )
 
     # ------------------------------------------------------------------ #
     # Public entry point
@@ -90,10 +109,54 @@ class IngestManager:
 
         file_paths, discovery_skipped = discover_files(paths, self.settings)
 
+        # Peek at the files: if any are stale, we need a VLM client. Load
+        # one lazily from the factory (if one is registered) and unload it
+        # at the end of ``ingest_paths``. This keeps VRAM free for search
+        # when indexing is not in progress.
+        need_vlm = any(self.file_tracker.check_staleness(p)[0] for p in file_paths)
+        loaded_vlm_client: VLMTopicClient | None = None
+        if (
+            need_vlm
+            and self.vlm_client is None
+            and self._vlm_factory is not None
+        ):
+            try:
+                logger.info("Loading VLM topic client for indexing pass ...")
+                loaded_vlm_client = self._vlm_factory()
+                self.vlm_client = loaded_vlm_client
+            except Exception as exc:
+                logger.warning("VLM topic client load failed: %s", exc)
+
         t_start = time.time()
+        try:
+            result = self._ingest_loop(
+                file_paths, stats, per_file_skipped, t_start,
+            )
+        finally:
+            if loaded_vlm_client is not None:
+                self.vlm_client = None
+                try:
+                    handle = getattr(loaded_vlm_client, "handle", None)
+                    if handle is not None and hasattr(handle, "unload"):
+                        handle.unload()
+                except Exception as exc:
+                    logger.warning("VLM unload failed: %s", exc)
+
+        return (
+            result[0], result[1] + discovery_skipped + result[2], result[3],
+        )
+
+    def _ingest_loop(
+        self,
+        file_paths: list[str],
+        stats: IndexingStats,
+        per_file_skipped: list[SkippedFile],
+        t_start: float,
+    ) -> tuple[IndexingStats, list[SkippedFile], list[SkippedFile], list[str]]:
+        inner_skipped: list[SkippedFile] = []
         for idx, file_path in enumerate(file_paths):
             if time.time() - t_start > self.settings.indexing_timeout:
-                per_file_skipped.extend(
+                inner_skipped.extend(
                     SkippedFile(path=fp, reason="indexing timeout")
                     for fp in file_paths[idx:]
                 )
@@ -130,7 +193,7 @@ class IngestManager:
 
             except Exception as exc:
                 logger.warning("Ingest error on %s: %s", file_path, exc)
-                per_file_skipped.append(
+                inner_skipped.append(
                     SkippedFile(path=file_path, reason=f"ingest error: {exc}")
                 )
 
@@ -144,7 +207,7 @@ class IngestManager:
                 "Index up to date: %d files unchanged, %d added, %d updated",
                 stats.files_skipped_unchanged, stats.files_added, stats.files_updated,
             )
-        return stats, discovery_skipped + per_file_skipped, file_paths
+        return stats, per_file_skipped, inner_skipped, file_paths
 
     # ------------------------------------------------------------------ #
     # Plan phase
@@ -249,10 +312,19 @@ class IngestManager:
             needed_pages: set[int] = set()
             for ch in chunks:
                 needed_pages.update(ch.page_refs)
+            file_sha = chunks[0].file_sha256 if chunks else ""
             for segment, image in iter_pdf(file_path, self.settings):
                 page_num = segment.page or 0
                 if page_num in needed_pages and page_num not in page_images and image is not None:
                     page_images[page_num] = image
+                    if file_sha:
+                        try:
+                            self.page_cache.put(file_sha, page_num, image)
+                        except Exception as exc:
+                            logger.warning(
+                                "Page cache put failed for %s p%d: %s",
+                                file_path, page_num, exc,
+                            )
                 # Accumulate text across text-segment fragments per page
                 if page_num in needed_pages:
                     existing = page_texts.get(page_num, "")

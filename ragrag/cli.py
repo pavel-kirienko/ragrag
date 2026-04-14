@@ -309,22 +309,16 @@ def _run_inprocess(args, settings) -> int:
         quantization=settings.quantization,
     )
 
-    # Try to load the VLM topic client. If it fails we log and continue —
-    # existing indexes still work for search-only queries.
-    vlm_client = None
-    try:
+    # VLM topic client is loaded lazily per indexing call via a factory,
+    # so searches over an already-indexed corpus never pay the VLM load cost.
+    def _vlm_factory() -> VLMTopicClient:
         logging.info("Loading VLM topic client '%s' ...", settings.vlm_model_id)
         handle = load_vlm(settings.vlm_model_id, quantization=settings.vlm_quantization)
-        vlm_client = VLMTopicClient(handle)
-    except Exception as exc:
-        logging.warning(
-            "VLM topic client unavailable (%s) — indexing new files will fail but existing "
-            "indexes are still searchable.", exc,
-        )
+        return VLMTopicClient(handle)
 
     logging.info("Opening local vector store...")
     store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
-    ingest_mgr = IngestManager(embedder, store, settings, vlm_client=vlm_client)
+    ingest_mgr = IngestManager(embedder, store, settings, vlm_factory=_vlm_factory)
     engine = SearchEngine(embedder, store, ingest_mgr, settings)
 
     request = SearchRequest(

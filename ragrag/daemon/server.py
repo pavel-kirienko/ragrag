@@ -129,7 +129,7 @@ class EngineCache:
         from ragrag.retrieval.search_engine import SearchEngine
 
         settings = self._settings_factory(index_path)
-        logger.info("Loading models for index %s ...", index_path)
+        logger.info("Loading ColQwen3 for index %s ...", index_path)
         t0 = time.time()
         embedder = ColQwenEmbedder(
             settings.model_id,
@@ -138,27 +138,21 @@ class EngineCache:
         )
         logger.info("ColQwen3 embedder ready in %.1fs", time.time() - t0)
 
-        # VLM topic client is optional: if loading fails we still serve
-        # search queries (reading an existing index), we just can't index
-        # new files. The daemon logs a warning and proceeds.
-        vlm_client: VLMTopicClient | None = None
-        try:
-            t_vlm = time.time()
-            vlm_handle = load_vlm(
+        # VLM topic client loads LAZILY per indexing pass. Keeping it in
+        # VRAM across calls would break search on 8 GB cards (ColQwen3 at
+        # 2.5 GB + Qwen2.5-VL-3B at 2.5 GB + activations > 8 GB).
+        def _vlm_factory() -> VLMTopicClient:
+            logger.info("Loading VLM topic client '%s' ...", settings.vlm_model_id)
+            handle = load_vlm(
                 settings.vlm_model_id,
                 quantization=settings.vlm_quantization,
             )
-            vlm_client = VLMTopicClient(vlm_handle)
-            logger.info("VLM topic client ready in %.1fs", time.time() - t_vlm)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "VLM topic client unavailable (%s) — indexing new files is disabled until the "
-                "VLM loads; searches over existing indexes still work.",
-                exc,
-            )
+            return VLMTopicClient(handle)
 
         store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
-        ingest = IngestManager(embedder, store, settings, vlm_client=vlm_client)
+        ingest = IngestManager(
+            embedder, store, settings, vlm_factory=_vlm_factory,
+        )
         engine = SearchEngine(embedder, store, ingest, settings)
         logger.info("Engine ready for %s in %.1fs total", index_path, time.time() - t0)
         return engine

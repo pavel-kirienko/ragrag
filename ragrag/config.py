@@ -80,6 +80,16 @@ class Settings(BaseModel):
         description="Filter directory listings through the nearest .gitignore.",
     )
 
+    # Page image cache (Phase C)
+    page_cache_max_mb: int = Field(
+        default=1024, ge=16,
+        description="Soft cap in MiB for the rendered page-image cache; LRU eviction.",
+    )
+    include_page_images_default: str = Field(
+        default="path",
+        description="Default image delivery mode: 'none' | 'path' | 'base64'.",
+    )
+
     # Filesystem
     include_hidden: bool = Field(default=False, description="Include hidden files/dirs.")
     follow_symlinks: bool = Field(default=True, description="Follow symbolic links.")

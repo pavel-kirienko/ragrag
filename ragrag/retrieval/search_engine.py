@@ -17,17 +17,99 @@ logger = logging.getLogger(__name__)
 
 from ragrag.config import Settings
 from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+from ragrag.index.page_cache import PageImageCache
 from ragrag.index.qdrant_store import QdrantStore
 from ragrag.models import (
     IndexingStats,
+    PageContext,
     SearchRequest,
     SearchResponse,
     SearchResult,
     TimingInfo,
 )
+from ragrag.retrieval.location_builder import build_location
 
 if TYPE_CHECKING:
     from ragrag.index.ingest_manager import IngestManager
+
+
+def _build_search_result(
+    rank: int,
+    point,
+    *,
+    respect_gitignore: bool,
+    max_listing: int,
+    page_cache: PageImageCache | None = None,
+    include_page_images: str = "path",
+) -> SearchResult:
+    """Project a Qdrant-like point onto a ``SearchResult``.
+
+    Works for both the new Chunk-shaped payloads (with ``chunk_id``, ``title``,
+    ``page_refs``, etc.) and the legacy Segment payloads from pre-Phase-B
+    indexes. Attaches a ``Location`` block computed on the fly via
+    ``build_location`` and — when ``page_cache`` is provided and the payload
+    has ``page_refs`` — ``context_pages`` referencing the cached WebP files.
+    """
+    payload = point.payload
+    path = payload["path"]
+    page_refs = payload.get("page_refs") or None
+    raw_line_ranges = payload.get("line_ranges") or None
+    line_ranges: list[tuple[int, int]] | None = None
+    if raw_line_ranges:
+        line_ranges = [tuple(pair) for pair in raw_line_ranges if len(pair) == 2]
+    # Prefer the hero_page on the payload; fall back to the legacy ``page``.
+    hero_page = payload.get("hero_page") or payload.get("page")
+    try:
+        location = build_location(
+            path, max_entries=max_listing, respect_gitignore=respect_gitignore,
+        )
+    except Exception:
+        location = None
+
+    context_pages: list[PageContext] = []
+    if page_cache is not None and include_page_images != "none" and page_refs:
+        file_sha = payload.get("file_sha256") or ""
+        for page_num in page_refs:
+            cached = page_cache.get(file_sha, page_num) if file_sha else None
+            ctx = PageContext(
+                page=int(page_num),
+                page_image_path=str(cached) if cached is not None and include_page_images == "path" else None,
+                page_image_b64=_encode_webp_b64(cached) if cached is not None and include_page_images == "base64" else None,
+                text="",  # filled by the consumer if it needs per-page text
+            )
+            context_pages.append(ctx)
+
+    return SearchResult(
+        rank=rank,
+        score=point.score,
+        path=path,
+        file_type=payload["file_type"],
+        modality=payload["modality"],
+        page=hero_page,
+        start_line=line_ranges[0][0] if line_ranges else payload.get("start_line"),
+        end_line=line_ranges[0][1] if line_ranges else payload.get("end_line"),
+        excerpt=payload.get("excerpt") or payload.get("summary") or "",
+        chunk_id=payload.get("chunk_id"),
+        title=payload.get("title"),
+        summary=payload.get("summary"),
+        page_refs=page_refs,
+        line_ranges=line_ranges,
+        context_pages=context_pages,
+        location=location,
+    )
+
+
+def _encode_webp_b64(path) -> str | None:
+    """Return a base64-encoded WebP payload for a cached page image."""
+    import base64
+
+    if path is None:
+        return None
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+    except OSError:
+        return None
 
 
 def _resolve_filter_paths(request_paths: list[str], indexed_paths: list[str]) -> list[str]:
@@ -124,27 +206,36 @@ class SearchEngine:
         logger.debug("Retrieval: %d results in %.1fms", len(scored_points), retrieval_ms)
 
         # ------------------------------------------------------------------
-        # Phase 4: Format results
+        # Phase 4: Chunk-level rollup + format results
         # ------------------------------------------------------------------
         t0 = time.time()
         results: list[SearchResult] = []
-        for i, point in enumerate(scored_points):
+        seen_chunk_ids: set[str] = set()
+        for point in scored_points:
+            chunk_id = point.payload.get("chunk_id")
+            # Legacy segment payloads (pre-Phase-B) have no chunk_id; treat
+            # each such point as its own chunk.
+            if chunk_id and chunk_id in seen_chunk_ids:
+                continue
+            if chunk_id:
+                seen_chunk_ids.add(chunk_id)
             try:
                 results.append(
-                    SearchResult(
-                        rank=i + 1,
-                        score=point.score,
-                        path=point.payload["path"],
-                        file_type=point.payload["file_type"],
-                        modality=point.payload["modality"],
-                        page=point.payload.get("page"),
-                        start_line=point.payload.get("start_line"),
-                        end_line=point.payload.get("end_line"),
-                        excerpt=point.payload["excerpt"],
+                    _build_search_result(
+                        len(results) + 1,
+                        point,
+                        respect_gitignore=self.settings.location_respect_gitignore,
+                        max_listing=self.settings.location_directory_listing_max,
+                        page_cache=getattr(self.ingest_manager, "page_cache", None),
+                        include_page_images=getattr(
+                            request, "include_page_images", None,
+                        ) or self.settings.include_page_images_default,
                     )
                 )
             except Exception as exc:  # noqa: BLE001
-                errors.append(f"Result formatting error (rank {i + 1}): {exc}")
+                errors.append(f"Result formatting error (rank {len(results) + 1}): {exc}")
+            if len(results) >= request.top_k:
+                break
         formatting_ms = (time.time() - t0) * 1000
 
         total_ms = (time.time() - t_start) * 1000

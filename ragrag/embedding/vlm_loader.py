@@ -153,12 +153,38 @@ def load_vlm(
     *,
     quantization: str = "auto",
     device: str | None = None,
+    min_free_vram_mib: int = 3072,
 ) -> VLMHandle:
-    """Load a vision-language model. Returns a ready-to-use ``VLMHandle``."""
+    """Load a vision-language model. Returns a ready-to-use ``VLMHandle``.
+
+    If CUDA is available but free VRAM is below ``min_free_vram_mib``, we
+    fall back to CPU (bf16) automatically so co-resident models like
+    ColQwen3 don't get evicted. Explicit ``device="cuda"`` bypasses this
+    safety check.
+    """
     import torch
     from transformers import AutoProcessor
 
+    explicit_device = device is not None
     chosen_device = device or detect_device()
+
+    # Safety: if CUDA is selected but free VRAM is too tight to fit the VLM
+    # AND accompanying model activations, fall back to CPU instead of
+    # erroring out the whole indexing pass. Caller can force CUDA with
+    # ``device="cuda"`` explicitly.
+    if chosen_device == "cuda" and not explicit_device:
+        try:
+            free_mib = torch.cuda.mem_get_info(0)[0] // (1024 * 1024)
+        except Exception:
+            free_mib = -1
+        if 0 < free_mib < min_free_vram_mib:
+            logger.warning(
+                "Only %d MiB free VRAM; loading VLM on CPU to preserve GPU room "
+                "(threshold: %d MiB). Indexing will be slower.",
+                free_mib, min_free_vram_mib,
+            )
+            chosen_device = "cpu"
+
     quant = resolve_quantization(quantization, chosen_device)
 
     logger.info("Loading VLM %s (device=%s, quant=%s)", model_id, chosen_device, quant)
