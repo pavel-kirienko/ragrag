@@ -56,6 +56,20 @@ class ColQwenEmbedder:
         quantization: str = "auto",
     ):
         """Load model and processor. Takes ~2-5 min on CPU with swap."""
+        # Remember init args so ``reload()`` can rebuild without the
+        # caller having to pass them again.
+        self.model_id = model_id
+        self.max_visual_tokens = int(max_visual_tokens)
+        self.quantization = quantization
+        self.model = None
+        self.processor = None
+        self._load()
+
+    def _load(self) -> None:
+        """Load model + processor. Used by __init__ and reload()."""
+        model_id = self.model_id
+        max_visual_tokens = self.max_visual_tokens
+        quantization = self.quantization
         t0 = time.time()
         _cached = try_to_load_from_cache(model_id, "config.json")
         local_only = isinstance(_cached, str)
@@ -224,3 +238,35 @@ class ColQwenEmbedder:
     def embedding_dim(self) -> int:
         """Return embedding dimension (320 for ColQwen3)."""
         return 320
+
+    @property
+    def is_loaded(self) -> bool:
+        return self.model is not None
+
+    def unload(self) -> None:
+        """Release GPU/CPU memory held by the model. Idempotent.
+
+        The ingest pipeline calls this before loading the VLM topic chunker
+        so both 2.5 GB-class models don't compete for VRAM on small cards.
+        Call :meth:`reload` to bring the model back.
+        """
+        if self.model is None:
+            return
+        try:
+            del self.model
+        except Exception:
+            pass
+        self.model = None
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except Exception:
+            pass
+        logger.info("ColQwen3 embedder unloaded")
+
+    def reload(self) -> None:
+        """Re-run the load path using the original init args. Idempotent."""
+        if self.model is not None:
+            return
+        self._load()

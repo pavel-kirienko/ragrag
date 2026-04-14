@@ -115,11 +115,23 @@ class IngestManager:
         # when indexing is not in progress.
         need_vlm = any(self.file_tracker.check_staleness(p)[0] for p in file_paths)
         loaded_vlm_client: VLMTopicClient | None = None
+        embedder_was_unloaded = False
         if (
             need_vlm
             and self.vlm_client is None
             and self._vlm_factory is not None
         ):
+            # Two-pass memory discipline: the VLM is ~2.5 GB and ColQwen3 is
+            # also ~2.5 GB; together they don't fit alongside the desktop on
+            # an 8 GB card. Unload the embedder before we start loading the
+            # VLM, then reload it once the plan phase finishes. ColQwen3
+            # reload from the HF cache is ~10-15 s.
+            try:
+                logger.info("Unloading ColQwen3 embedder to free VRAM for VLM ...")
+                self.embedder.unload()
+                embedder_was_unloaded = True
+            except Exception as exc:
+                logger.warning("Embedder unload failed: %s", exc)
             try:
                 logger.info("Loading VLM topic client for indexing pass ...")
                 loaded_vlm_client = self._vlm_factory()
@@ -128,11 +140,39 @@ class IngestManager:
                 logger.warning("VLM topic client load failed: %s", exc)
 
         t_start = time.time()
+        inner_skipped: list[SkippedFile] = []
         try:
-            result = self._ingest_loop(
-                file_paths, stats, per_file_skipped, t_start,
-            )
+            # --- Plan phase (VLM loaded, embedder unloaded) -------------------
+            plans: list[tuple[str, FileType, str, list[Chunk], list[str]]] = []
+            for idx, file_path in enumerate(file_paths):
+                if time.time() - t_start > self.settings.indexing_timeout:
+                    inner_skipped.extend(
+                        SkippedFile(path=fp, reason="indexing timeout")
+                        for fp in file_paths[idx:]
+                    )
+                    break
+                try:
+                    existing_point_ids = self.file_tracker.get_point_ids(file_path)
+                    needs_reindex, current_state = self.file_tracker.check_staleness(file_path)
+                    if not needs_reindex:
+                        stats.files_skipped_unchanged += 1
+                        continue
+                    logger.info("Planning %s (%d/%d)", file_path, idx + 1, len(file_paths))
+                    file_type = get_file_type(file_path)
+                    if file_type is None:
+                        raise ValueError("unsupported file type")
+                    file_sha256 = current_state.content_hash_sha256
+                    chunks = self._plan_chunks(file_path, file_type, file_sha256)
+                    plans.append(
+                        (file_path, file_type, file_sha256, chunks, existing_point_ids)
+                    )
+                except Exception as exc:
+                    logger.warning("Plan error on %s: %s", file_path, exc)
+                    inner_skipped.append(
+                        SkippedFile(path=file_path, reason=f"plan error: {exc}")
+                    )
         finally:
+            # Unload VLM and bring the embedder back so we can embed + upsert.
             if loaded_vlm_client is not None:
                 self.vlm_client = None
                 try:
@@ -141,60 +181,38 @@ class IngestManager:
                         handle.unload()
                 except Exception as exc:
                     logger.warning("VLM unload failed: %s", exc)
+            if embedder_was_unloaded:
+                try:
+                    logger.info("Reloading ColQwen3 embedder for embed phase ...")
+                    self.embedder.reload()
+                except Exception as exc:
+                    logger.warning("Embedder reload failed: %s", exc)
 
-        return (
-            result[0], result[1] + discovery_skipped + result[2], result[3],
-        )
-
-    def _ingest_loop(
-        self,
-        file_paths: list[str],
-        stats: IndexingStats,
-        per_file_skipped: list[SkippedFile],
-        t_start: float,
-    ) -> tuple[IndexingStats, list[SkippedFile], list[SkippedFile], list[str]]:
-        inner_skipped: list[SkippedFile] = []
-        for idx, file_path in enumerate(file_paths):
+        # --- Embed + upsert phase (embedder loaded, VLM gone) ------------
+        for file_path, file_type, file_sha256, chunks, existing_point_ids in plans:
             if time.time() - t_start > self.settings.indexing_timeout:
-                inner_skipped.extend(
-                    SkippedFile(path=fp, reason="indexing timeout")
-                    for fp in file_paths[idx:]
+                inner_skipped.append(
+                    SkippedFile(path=file_path, reason="indexing timeout")
                 )
-                break
+                continue
             try:
-                existing_point_ids = self.file_tracker.get_point_ids(file_path)
-                needs_reindex, current_state = self.file_tracker.check_staleness(file_path)
-
-                if not needs_reindex:
-                    stats.files_skipped_unchanged += 1
-                    continue
-
-                logger.info("Indexing %s (%d/%d)", file_path, idx + 1, len(file_paths))
                 was_previously_indexed = len(existing_point_ids) > 0
                 if was_previously_indexed:
                     self.store.delete_by_ids(existing_point_ids)
-
-                file_type = get_file_type(file_path)
-                if file_type is None:
-                    raise ValueError("unsupported file type")
-
-                file_sha256 = current_state.content_hash_sha256
-                chunks = self._plan_chunks(file_path, file_type, file_sha256)
                 point_ids = self._embed_and_store(file_path, file_type, chunks)
-
+                # Refresh file state so mark_indexed records the current hash.
+                _needs, current_state = self.file_tracker.check_staleness(file_path)
                 self.file_tracker.mark_indexed(
                     file_path, point_ids, file_state=current_state,
                 )
-
                 if was_previously_indexed:
                     stats.files_updated += 1
                 else:
                     stats.files_added += 1
-
             except Exception as exc:
-                logger.warning("Ingest error on %s: %s", file_path, exc)
+                logger.warning("Embed error on %s: %s", file_path, exc)
                 inner_skipped.append(
-                    SkippedFile(path=file_path, reason=f"ingest error: {exc}")
+                    SkippedFile(path=file_path, reason=f"embed error: {exc}")
                 )
 
         if stats.files_added == 0 and stats.files_updated == 0:
@@ -207,7 +225,7 @@ class IngestManager:
                 "Index up to date: %d files unchanged, %d added, %d updated",
                 stats.files_skipped_unchanged, stats.files_added, stats.files_updated,
             )
-        return stats, per_file_skipped, inner_skipped, file_paths
+        return stats, per_file_skipped + discovery_skipped + inner_skipped, file_paths
 
     # ------------------------------------------------------------------ #
     # Plan phase

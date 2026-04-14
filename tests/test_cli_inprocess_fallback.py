@@ -13,20 +13,15 @@ from ragrag.config import Settings
 from ragrag.daemon.client import DaemonStartupError
 
 
-class _StubResponse:
-    """Minimal SearchResponse stand-in returned by the mock engine."""
+def _stub_response() -> "SearchResponse":  # noqa: F821 — runtime import
+    from ragrag.models import IndexingStats, SearchResponse, TimingInfo
 
-    def __init__(self) -> None:
-        self.query = "stub"
-        self.status = "complete"
-        self.results = []
-        from ragrag.models import IndexingStats, TimingInfo
-
-        self.indexed_now = IndexingStats()
-        self.timing_ms = TimingInfo()
-
-    def model_dump_json(self, indent: int = 2) -> str:
-        return '{"status": "complete"}'
+    return SearchResponse(
+        query="stub",
+        status="complete",
+        indexed_now=IndexingStats(),
+        timing_ms=TimingInfo(),
+    )
 
 
 def test_cli_falls_back_to_inprocess_when_daemon_fails(
@@ -48,7 +43,7 @@ def test_cli_falls_back_to_inprocess_when_daemon_fails(
     )
     (tmp_path / ".ragrag").mkdir()
 
-    response = _StubResponse()
+    response = _stub_response()
     with (
         patch("ragrag.daemon.client.DaemonClient.ensure_daemon", side_effect=DaemonStartupError("nope")),
         patch("ragrag.cli.find_index_root", return_value=(str(tmp_path), settings)),
@@ -85,7 +80,7 @@ def test_cli_skips_daemon_when_no_daemon_flag_set(
     )
     (tmp_path / ".ragrag").mkdir()
 
-    response = _StubResponse()
+    response = _stub_response()
     with (
         patch("ragrag.daemon.client.DaemonClient.ensure_daemon") as mock_ensure,
         patch("ragrag.cli.find_index_root", return_value=(str(tmp_path), settings)),
@@ -119,7 +114,7 @@ def test_cli_skips_daemon_when_env_var_set(
     )
     (tmp_path / ".ragrag").mkdir()
 
-    response = _StubResponse()
+    response = _stub_response()
     with (
         patch("ragrag.daemon.client.DaemonClient.ensure_daemon") as mock_ensure,
         patch("ragrag.cli.find_index_root", return_value=(str(tmp_path), settings)),

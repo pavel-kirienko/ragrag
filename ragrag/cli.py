@@ -170,6 +170,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit a human-readable Markdown report on stdout instead of JSON.",
     )
     parser.add_argument(
+        "--format",
+        default=None,
+        choices=["json", "compact-json", "markdown", "markdown-rich"],
+        help=(
+            "Explicit output format. Overrides --json / --markdown. "
+            "'compact-json' trims excerpts and base64 image payloads for "
+            "LLM consumers with tight context budgets; 'markdown-rich' is "
+            "the topic-aware Markdown report with embedded page images "
+            "and Location blocks."
+        ),
+    )
+    parser.add_argument(
+        "--include-page-images",
+        default=None,
+        choices=["none", "path", "base64"],
+        help=(
+            "Delivery mode for PDF page images in each result's context_pages. "
+            "Default comes from config (`include_page_images_default`, 'path')."
+        ),
+    )
+    parser.add_argument(
         "--model",
         default=None,
         metavar="MODEL",
@@ -247,6 +268,39 @@ def _daemon_disabled(args) -> bool:
     return False
 
 
+def _resolve_format(args) -> str:
+    if args.format:
+        return args.format
+    if args.output_markdown:
+        return "markdown-rich"
+    return "json"
+
+
+def _render_response(result: dict, fmt: str) -> None:
+    from ragrag.models import SearchResponse
+    from ragrag.retrieval.result_formatter import (
+        format_as_compact_json,
+        format_as_json,
+        format_as_markdown,
+        format_as_markdown_rich,
+    )
+
+    if fmt == "json":
+        print(json.dumps(result, indent=2))
+        return
+    try:
+        response = SearchResponse(**result)
+    except Exception:
+        print(json.dumps(result, indent=2))
+        return
+    if fmt == "compact-json":
+        print(format_as_compact_json(response))
+    elif fmt == "markdown":
+        print(format_as_markdown(response))
+    else:  # markdown-rich
+        print(format_as_markdown_rich(response))
+
+
 def _run_via_daemon(args, settings) -> int | None:
     """Try to run the query through the daemon. Returns exit code on success,
     or ``None`` when the daemon path is unusable and the caller should fall back.
@@ -270,20 +324,7 @@ def _run_via_daemon(args, settings) -> int | None:
         logging.warning("Daemon RPC failed (%s); falling back to in-process engine", exc)
         return None
 
-    # Print result. Daemon returns the same SearchResponse shape (dict).
-    if args.output_markdown:
-        from ragrag.models import SearchResponse
-        from ragrag.retrieval.result_formatter import format_as_markdown
-
-        try:
-            response = SearchResponse(**result)
-        except Exception:
-            print(json.dumps(result, indent=2))
-        else:
-            print(format_as_markdown(response))
-    else:
-        print(json.dumps(result, indent=2))
-
+    _render_response(result if isinstance(result, dict) else {}, _resolve_format(args))
     status = result.get("status") if isinstance(result, dict) else None
     return 0 if status == "complete" else 1
 
@@ -300,7 +341,7 @@ def _run_inprocess(args, settings) -> int:
     from ragrag.retrieval.search_engine import SearchEngine
 
     top_k = args.top_k if args.top_k is not None else settings.top_k
-    use_markdown = args.output_markdown
+    fmt = _resolve_format(args)
 
     logging.info("Initializing model '%s' (first run may take a long time)...", settings.model_id)
     embedder = ColQwenEmbedder(
@@ -325,7 +366,8 @@ def _run_inprocess(args, settings) -> int:
         paths=args.paths,
         query=args.query,
         top_k=top_k,
-        include_markdown=use_markdown,
+        include_markdown=(fmt.startswith("markdown")),
+        include_page_images=args.include_page_images,
     )
 
     logging.info("Running indexing + search over %d path(s)...", len(args.paths))
@@ -339,11 +381,7 @@ def _run_inprocess(args, settings) -> int:
         response.indexed_now.files_skipped_unchanged,
     )
 
-    if use_markdown:
-        print(format_as_markdown(response))
-    else:
-        print(format_as_json(response))
-
+    _render_response(response.model_dump(), fmt)
     return 0 if response.status == "complete" else 1
 
 

@@ -143,7 +143,10 @@ def test_ingest_logs_progress_when_updating_index(tmp_path: Path, caplog: pytest
     assert stats.files_added == 1
     assert skipped == []
     messages = [record.getMessage() for record in caplog.records if record.name == "ragrag.index.ingest_manager"]
-    assert any("Indexing" in message and "(1/1)" in message for message in messages)
+    assert any(
+        ("Planning" in message or "Indexing" in message) and "(1/1)" in message
+        for message in messages
+    )
     assert any("Index up to date:" in message for message in messages)
 
 

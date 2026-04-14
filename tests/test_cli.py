@@ -200,7 +200,12 @@ def test_main_markdown_output(
         result = main()
 
     assert result == 0
-    assert "# Search Results" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # `--markdown` resolves to 'markdown-rich' under Phase B/C. Both legacy and
+    # rich start with '# Search' and carry a status line so we check for the
+    # common prefix rather than the old-specific heading text.
+    assert out.startswith("# Search")
+    assert "Status" in out
 
 
 def test_main_model_and_top_k_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
