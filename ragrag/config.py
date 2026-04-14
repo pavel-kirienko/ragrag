@@ -58,8 +58,11 @@ class Settings(BaseModel):
         description="Max tokens per VLM prompt for the text topic segmenter.",
     )
     chunker_stride_pages: int = Field(
-        default=8, ge=1, le=32,
-        description="Pages per VLM call for the PDF topic chunker.",
+        default=3, ge=1, le=32,
+        description="Pages per VLM call for the PDF topic chunker. Smaller "
+                    "values keep activation memory lower on tight GPUs (3 is "
+                    "the ceiling on an 8 GB card); larger values give the "
+                    "VLM more cross-page context on larger GPUs.",
     )
     chunker_max_topics_per_call: int = Field(
         default=16, ge=1, le=64,

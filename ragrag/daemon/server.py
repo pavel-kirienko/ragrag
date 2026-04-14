@@ -142,10 +142,17 @@ class EngineCache:
         # VRAM across calls would break search on 8 GB cards (ColQwen3 at
         # 2.5 GB + Qwen2.5-VL-3B at 2.5 GB + activations > 8 GB).
         def _vlm_factory() -> VLMTopicClient:
-            logger.info("Loading VLM topic client '%s' ...", settings.vlm_model_id)
+            import torch
+
+            forced_device = "cuda" if torch.cuda.is_available() else None
+            logger.info(
+                "Loading VLM topic client '%s' (device=%s) ...",
+                settings.vlm_model_id, forced_device or "auto",
+            )
             handle = load_vlm(
                 settings.vlm_model_id,
                 quantization=settings.vlm_quantization,
+                device=forced_device,
             )
             return VLMTopicClient(handle)
 
@@ -375,6 +382,7 @@ class DaemonServer:
         self.dispatcher = Dispatcher(self.engine_cache, self.state, self.shutdown_event)
         self._sock: socket.socket | None = None
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ragrag-rpc")
+        self._status_server = None  # lazily constructed in run()
 
     def _bind(self) -> None:
         if self.socket_path.exists():
@@ -406,6 +414,11 @@ class DaemonServer:
         try:
             if self.pid_path.exists():
                 self.pid_path.unlink()
+        except Exception:
+            pass
+        try:
+            if self._status_server is not None:
+                self._status_server.stop()
         except Exception:
             pass
         self.engine_cache.unload_all()
@@ -474,13 +487,30 @@ class DaemonServer:
 
     def run(self) -> int:
         self._bind()
+        # Start the HTTP status server before writing the pid file so the
+        # actual bound port lands in daemon.pid line 4.
+        try:
+            from ragrag.daemon.http_status import StatusServer
+
+            settings = get_settings(self.index_path)
+            self._status_server = StatusServer(
+                self,
+                host=settings.daemon_status_host,
+                port=self.http_port or settings.daemon_status_port,
+            )
+            self.http_port = self._status_server.start()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HTTP status server failed to start: %s", exc)
+            self._status_server = None
         self._write_pid_file()
         self._install_signals()
         idle_thread = threading.Thread(target=self._idle_checker, daemon=True, name="ragrag-idle")
         idle_thread.start()
         logger.info(
-            "Daemon listening on %s (device=%s, idle_timeout=%.0fs)",
+            "Daemon listening on %s (device=%s, idle_timeout=%.0fs, dashboard=http://%s:%d/)",
             self.socket_path, self.state.device_mode, self.idle_timeout_s,
+            settings.daemon_status_host if self._status_server else "?",
+            self.http_port if self._status_server else 0,
         )
         try:
             assert self._sock is not None

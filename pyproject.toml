@@ -23,6 +23,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "qwen-vl-utils>=0.0.10",
     "python-magic>=0.4.27",
+    "psutil>=5.9",
 ]
 
 [project.scripts]

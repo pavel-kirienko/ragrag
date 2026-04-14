@@ -130,6 +130,19 @@ class IngestManager:
                 logger.info("Unloading ColQwen3 embedder to free VRAM for VLM ...")
                 self.embedder.unload()
                 embedder_was_unloaded = True
+                # bnb's 4-bit state dicts leave fragmented blocks in the
+                # torch allocator even after empty_cache. Force a second
+                # collection pass so the free-VRAM poll in load_vlm sees
+                # the real free amount.
+                try:
+                    import gc
+                    gc.collect()
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                except Exception:
+                    pass
             except Exception as exc:
                 logger.warning("Embedder unload failed: %s", exc)
             try:
@@ -182,6 +195,19 @@ class IngestManager:
                 except Exception as exc:
                     logger.warning("VLM unload failed: %s", exc)
             if embedder_was_unloaded:
+                # Force torch to compact its allocator cache before reload —
+                # bnb 4-bit deletion leaves fragmented blocks that
+                # ``mem_get_info`` doesn't count as free until we flush.
+                try:
+                    import gc
+                    import torch
+
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                except Exception:
+                    pass
                 try:
                     logger.info("Reloading ColQwen3 embedder for embed phase ...")
                     self.embedder.reload()

@@ -353,8 +353,18 @@ def _run_inprocess(args, settings) -> int:
     # VLM topic client is loaded lazily per indexing call via a factory,
     # so searches over an already-indexed corpus never pay the VLM load cost.
     def _vlm_factory() -> VLMTopicClient:
-        logging.info("Loading VLM topic client '%s' ...", settings.vlm_model_id)
-        handle = load_vlm(settings.vlm_model_id, quantization=settings.vlm_quantization)
+        import torch
+
+        forced_device = "cuda" if torch.cuda.is_available() else None
+        logging.info(
+            "Loading VLM topic client '%s' (device=%s) ...",
+            settings.vlm_model_id, forced_device or "auto",
+        )
+        handle = load_vlm(
+            settings.vlm_model_id,
+            quantization=settings.vlm_quantization,
+            device=forced_device,
+        )
         return VLMTopicClient(handle)
 
     logging.info("Opening local vector store...")
