@@ -383,7 +383,19 @@ def _run_inprocess(args, settings) -> int:
     logging.info("Opening local vector store...")
     store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
     ingest_mgr = IngestManager(embedder, store, settings, vlm_factory=_vlm_factory)
-    engine = SearchEngine(embedder, store, ingest_mgr, settings)
+
+    reranker = None
+    if settings.reranker_model and settings.reranker_model.lower() not in {"none", ""}:
+        try:
+            from ragrag.retrieval.reranker import VLMReranker
+
+            reranker = VLMReranker(settings)
+            logging.info("VLM reranker armed (model=%s)", settings.vlm_model_id)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Reranker init failed: %s — falling back to MaxSim-only", exc)
+            reranker = None
+
+    engine = SearchEngine(embedder, store, ingest_mgr, settings, reranker=reranker)
 
     request = SearchRequest(
         paths=args.paths,

@@ -162,8 +162,20 @@ class EngineCache:
         ingest = IngestManager(
             embedder, store, settings, vlm_factory=_vlm_factory,
         )
-        engine = SearchEngine(embedder, store, ingest, settings)
-        logger.info("Engine ready for %s in %.1fs total", index_path, time.time() - t0)
+
+        reranker = None
+        if settings.reranker_model and settings.reranker_model.lower() not in {"none", ""}:
+            try:
+                from ragrag.retrieval.reranker import VLMReranker
+
+                reranker = VLMReranker(settings)
+                logger.info("VLM reranker armed (model=%s)", settings.vlm_model_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Reranker init failed: %s — falling back to MaxSim-only", exc)
+                reranker = None
+
+        engine = SearchEngine(embedder, store, ingest, settings, reranker=reranker)
+        logger.info("Engine ready for %s", index_path)
         return engine
 
     def unload_all(self) -> None:

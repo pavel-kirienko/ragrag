@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -144,11 +144,13 @@ class SearchEngine:
         store: QdrantStore,
         ingest_manager: IngestManager,
         settings: Settings,
+        reranker: Optional[Any] = None,
     ) -> None:
         self.embedder = embedder
         self.store = store
         self.ingest_manager = ingest_manager
         self.settings = settings
+        self.reranker = reranker
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """Execute full search pipeline: ingest → embed query → retrieve → format."""
@@ -199,9 +201,13 @@ class SearchEngine:
         # Phase 3: Retrieval
         # ------------------------------------------------------------------
         t0 = time.time()
+        # Oversample when a reranker is attached so the reranker has room
+        # to shuffle the order. Without a reranker, oversample=1.
+        oversample = int(getattr(self.settings, "rerank_oversample", 1) or 1)
+        want_raw = request.top_k * oversample if self.reranker is not None else request.top_k
         try:
             filter_paths = _resolve_filter_paths(request.paths, indexed_paths)
-            scored_points = self.store.search(query_vec, top_k=request.top_k, path_filter=filter_paths)
+            scored_points = self.store.search(query_vec, top_k=want_raw, path_filter=filter_paths)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"Retrieval error: {exc}")
             scored_points = []
@@ -237,9 +243,29 @@ class SearchEngine:
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"Result formatting error (rank {len(results) + 1}): {exc}")
-            if len(results) >= request.top_k:
+            # With a reranker attached we keep the oversampled candidate
+            # pool and let the reranker shrink it back down to top_k;
+            # otherwise we cut at the requested top_k here.
+            if self.reranker is None and len(results) >= request.top_k:
+                break
+            if self.reranker is not None and len(results) >= want_raw:
                 break
         formatting_ms = (time.time() - t0) * 1000
+
+        # ------------------------------------------------------------------
+        # Phase 5: Optional VLM rerank
+        # ------------------------------------------------------------------
+        rerank_ms = 0.0
+        if self.reranker is not None and results:
+            t_rerank = time.time()
+            try:
+                results = self.reranker.rerank(request.query, results)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"Rerank error: {exc}")
+            rerank_ms = (time.time() - t_rerank) * 1000
+            results = results[: request.top_k]
+        else:
+            results = results[: request.top_k]
 
         total_ms = (time.time() - t_start) * 1000
 
@@ -255,6 +281,7 @@ class SearchEngine:
                 query_embedding_ms=query_embedding_ms,
                 retrieval_ms=retrieval_ms,
                 formatting_ms=formatting_ms,
+                rerank_ms=rerank_ms,
                 total_ms=total_ms,
             ),
         )

@@ -107,6 +107,30 @@ class Settings(BaseModel):
         description="Close a topic after this many pages without any reference.",
     )
 
+    # Phase D — VLM reranker
+    reranker_model: str = Field(
+        default="none",
+        description="Reranker model: 'none' (off, MaxSim-only), "
+                    "or 'vlm' (spawn a listwise VLM reranker subprocess "
+                    "using vlm_model_id). Default off on tight GPUs.",
+    )
+    rerank_oversample: int = Field(
+        default=3, ge=1, le=8,
+        description="Retrieve top_k * oversample raw candidates before rerank.",
+    )
+    rerank_max_candidates: int = Field(
+        default=10, ge=1, le=50,
+        description="Maximum candidates handed to the VLM reranker per query.",
+    )
+    rerank_image_max_side: int = Field(
+        default=640, ge=256, le=2048,
+        description="Max image side for hero-page thumbnails passed to the reranker.",
+    )
+    rerank_max_new_tokens: int = Field(
+        default=384, ge=64, le=2048,
+        description="Max generation tokens for one reranker call.",
+    )
+
     # Location builder (Phase B)
     location_directory_listing_max: int = Field(
         default=64, ge=1,

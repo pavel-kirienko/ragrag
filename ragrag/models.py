@@ -190,6 +190,7 @@ class TimingInfo(BaseModel):
     query_embedding_ms: float = 0.0
     retrieval_ms: float = 0.0
     formatting_ms: float = 0.0
+    rerank_ms: float = 0.0
     total_ms: float = 0.0
 
 
