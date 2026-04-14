@@ -20,7 +20,14 @@ class Settings(BaseModel):
 
     # Embedding model
     model_id: str = Field(default="TomoroAI/tomoro-colqwen3-embed-4b", description="HuggingFace model ID.")
-    max_visual_tokens: int = Field(default=16384, description="Max visual tokens per image.")
+    max_visual_tokens: int = Field(
+        default=4096,
+        description="Max visual tokens per image fed to the ColQwen3 "
+                    "embedder. Defaults to 4096 (~5 MiB activation per "
+                    "forward pass at bf16) so the embed phase stays under "
+                    "the 8 GB reference card's ceiling when bnb 4-bit "
+                    "weights + cuBLAS workspace already pin ~5 GiB.",
+    )
     quantization: str = Field(
         default="auto",
         description="GPU weight quantization: 'auto' (8-bit on CUDA), 'none', '8bit', '4bit'.",

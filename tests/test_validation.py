@@ -54,7 +54,7 @@ def test_config_defaults() -> None:
     assert settings.top_k == 10
     assert settings.max_top_k == 50
     assert settings.model_id == "TomoroAI/tomoro-colqwen3-embed-4b"
-    assert settings.max_visual_tokens == 16384
+    assert settings.max_visual_tokens == 4096
     assert settings.indexing_timeout == 100000.0
 
 def test_models_instantiate() -> None:

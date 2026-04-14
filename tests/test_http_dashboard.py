@@ -98,7 +98,9 @@ def test_dashboard_index_returns_html(tmp_path: Path) -> None:
 def test_dashboard_status_payload_has_expected_keys(tmp_path: Path) -> None:
     server = _start_daemon(tmp_path)
     try:
-        with urllib.request.urlopen(_dashboard_base(server) + "/status", timeout=2.0) as resp:
+        # /status shells out to nvidia-smi (2 s timeout) on CUDA hosts so
+        # the first request can take a few seconds on a cold system.
+        with urllib.request.urlopen(_dashboard_base(server) + "/status", timeout=10.0) as resp:
             assert resp.status == 200
             payload = json.loads(resp.read().decode("utf-8"))
         assert "version" in payload
