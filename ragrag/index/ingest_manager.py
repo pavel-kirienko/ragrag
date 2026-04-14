@@ -114,139 +114,144 @@ class IngestManager:
         # at the end of ``ingest_paths``. This keeps VRAM free for search
         # when indexing is not in progress.
         need_vlm = any(self.file_tracker.check_staleness(p)[0] for p in file_paths)
-        loaded_vlm_client: VLMTopicClient | None = None
-        embedder_was_unloaded = False
-        if (
+        t_start = time.time()
+        inner_skipped: list[SkippedFile] = []
+        plans: list[tuple[str, FileType, str, list[Chunk], list[str]]] = []
+
+        # ---- Plan phase: run the VLM in a subprocess --------------------
+        #
+        # The VLM chunker lives in an isolated child process so that its
+        # bnb 4-bit CUDA context cannot contaminate the parent's
+        # allocator. The parent's embedder can then load cleanly into a
+        # pristine CUDA context after the child exits. Any in-process
+        # unload/reload dance was too fragile on tight 8 GB cards with a
+        # busy X11 desktop — the embedder would silently dispatch layers
+        # to CPU or OOM on the next forward pass.
+        use_subprocess = (
             need_vlm
             and self.vlm_client is None
             and self._vlm_factory is not None
-        ):
-            # Decide where the VLM is going to live BEFORE unloading anything.
-            # On a tight 8 GB card with a busy desktop, the VLM has to run on
-            # CPU — and in that case we don't swap out the embedder, so the
-            # embed phase doesn't have to survive a bnb 4-bit reload (which
-            # is flaky when the allocator is fragmented).
-            try:
-                from ragrag.embedding.vlm_loader import plan_vlm_placement
+        )
 
-                placement = plan_vlm_placement()
-            except Exception as exc:
-                logger.warning("VLM placement probe failed: %s; defaulting to cpu", exc)
-                placement = "cpu"
-            logger.info("VLM placement decision: %s", placement)
-
-            if placement == "cuda_swap":
-                # If the embedder was never loaded (defer_load=True at
-                # startup), we don't need to unload anything — the plan
-                # phase runs with a pristine CUDA context, then the
-                # embedder gets its first load from scratch after the
-                # VLM unloads. That path is clean; reload-after-VLM is
-                # the fragile one.
-                if getattr(self.embedder, "is_loaded", True):
-                    try:
-                        logger.info("Unloading ColQwen3 embedder to free VRAM for VLM ...")
-                        self.embedder.unload()
-                        embedder_was_unloaded = True
-                        try:
-                            import gc
-                            gc.collect()
-                            import torch
-
-                            if torch.cuda.is_available():
-                                torch.cuda.empty_cache()
-                                torch.cuda.synchronize()
-                        except Exception:
-                            pass
-                    except Exception as exc:
-                        logger.warning("Embedder unload failed: %s", exc)
-                else:
-                    logger.info("Embedder not yet loaded; skipping unload.")
-
-            forced_device = {
-                "cuda_coexist": "cuda",
-                "cuda_swap": "cuda",
-                "cpu": "cpu",
-            }.get(placement)
-            try:
-                logger.info(
-                    "Loading VLM topic client for indexing pass (device=%s) ...",
-                    forced_device,
+        # First, walk every file and either mark it stale (recording its
+        # metadata) or skip it as up-to-date.
+        stale_plan_targets: list[tuple[str, FileType, str, list[str]]] = []
+        for idx, file_path in enumerate(file_paths):
+            if time.time() - t_start > self.settings.indexing_timeout:
+                inner_skipped.extend(
+                    SkippedFile(path=fp, reason="indexing timeout")
+                    for fp in file_paths[idx:]
                 )
-                loaded_vlm_client = self._vlm_factory(device=forced_device)
-                self.vlm_client = loaded_vlm_client
+                break
+            try:
+                existing_point_ids = self.file_tracker.get_point_ids(file_path)
+                needs_reindex, current_state = self.file_tracker.check_staleness(file_path)
+                if not needs_reindex:
+                    stats.files_skipped_unchanged += 1
+                    continue
+                logger.info("Planning %s (%d/%d)", file_path, idx + 1, len(file_paths))
+                file_type = get_file_type(file_path)
+                if file_type is None:
+                    raise ValueError("unsupported file type")
+                file_sha256 = current_state.content_hash_sha256
+                stale_plan_targets.append(
+                    (file_path, file_type, file_sha256, existing_point_ids)
+                )
             except Exception as exc:
-                logger.warning("VLM topic client load failed: %s", exc)
+                logger.warning("Discovery error on %s: %s", file_path, exc)
+                inner_skipped.append(
+                    SkippedFile(path=file_path, reason=f"discovery error: {exc}")
+                )
 
-        t_start = time.time()
-        inner_skipped: list[SkippedFile] = []
-        try:
-            # --- Plan phase (VLM loaded, embedder unloaded) -------------------
-            plans: list[tuple[str, FileType, str, list[Chunk], list[str]]] = []
-            for idx, file_path in enumerate(file_paths):
-                if time.time() - t_start > self.settings.indexing_timeout:
-                    inner_skipped.extend(
-                        SkippedFile(path=fp, reason="indexing timeout")
-                        for fp in file_paths[idx:]
-                    )
-                    break
+        # Partition: images go through the in-process path (no VLM).
+        # PDFs and text files go to the subprocess planner.
+        subprocess_batch: list[tuple[str, str, FileType]] = []
+        for file_path, file_type, file_sha256, _existing in stale_plan_targets:
+            if file_type == FileType.IMAGE:
                 try:
-                    existing_point_ids = self.file_tracker.get_point_ids(file_path)
-                    needs_reindex, current_state = self.file_tracker.check_staleness(file_path)
-                    if not needs_reindex:
-                        stats.files_skipped_unchanged += 1
-                        continue
-                    logger.info("Planning %s (%d/%d)", file_path, idx + 1, len(file_paths))
-                    file_type = get_file_type(file_path)
-                    if file_type is None:
-                        raise ValueError("unsupported file type")
-                    file_sha256 = current_state.content_hash_sha256
-                    chunks = self._plan_chunks(file_path, file_type, file_sha256)
+                    chunks = self._plan_image(file_path, file_sha256)
                     plans.append(
-                        (file_path, file_type, file_sha256, chunks, existing_point_ids)
+                        (file_path, file_type, file_sha256, chunks,
+                         self.file_tracker.get_point_ids(file_path))
                     )
                 except Exception as exc:
                     logger.warning("Plan error on %s: %s", file_path, exc)
                     inner_skipped.append(
                         SkippedFile(path=file_path, reason=f"plan error: {exc}")
                     )
-        finally:
-            # Unload VLM and bring the embedder back so we can embed + upsert.
-            if loaded_vlm_client is not None:
-                self.vlm_client = None
-                try:
-                    handle = getattr(loaded_vlm_client, "handle", None)
-                    if handle is not None and hasattr(handle, "unload"):
-                        handle.unload()
-                except Exception as exc:
-                    logger.warning("VLM unload failed: %s", exc)
-            if embedder_was_unloaded:
-                try:
-                    import gc
-                    import torch
-
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                except Exception:
-                    pass
-                try:
-                    logger.info("Reloading ColQwen3 embedder for embed phase ...")
-                    self.embedder.reload()
-                except Exception as exc:
-                    logger.warning("Embedder reload failed: %s", exc)
             else:
-                # Embedder was either never loaded (first ingest with
-                # defer_load=True) or we decided to keep it resident on
-                # CPU while the VLM ran. Ensure it is loaded before we
-                # try to embed anything.
+                subprocess_batch.append((file_path, file_sha256, file_type))
+
+        if subprocess_batch and use_subprocess:
+            from ragrag.extractors.vlm_topic_subprocess import (
+                SubprocessVLMPlanner,
+                SubprocessVLMPlannerError,
+            )
+
+            planner = SubprocessVLMPlanner(self.settings)
+            try:
+                logger.info(
+                    "Planning %d file(s) in VLM subprocess ...", len(subprocess_batch)
+                )
+                results = planner.plan_files(subprocess_batch)
+            except SubprocessVLMPlannerError as exc:
+                logger.warning("VLM subprocess planner failed: %s", exc)
+                results = {}
+                for file_path, _sha, _ft in subprocess_batch:
+                    inner_skipped.append(
+                        SkippedFile(path=file_path, reason=f"vlm worker failed: {exc}")
+                    )
+
+            existing_by_path = {
+                fp: existing for fp, _ft, _sha, existing in stale_plan_targets
+            }
+            for file_path, file_sha256, file_type in subprocess_batch:
+                outcome = results.get(file_path)
+                existing_point_ids = existing_by_path.get(file_path, [])
+                if outcome is None:
+                    continue  # already recorded as skipped above
+                if isinstance(outcome, dict) and "error" in outcome:
+                    logger.warning(
+                        "Plan error on %s: %s", file_path, outcome["error"]
+                    )
+                    inner_skipped.append(
+                        SkippedFile(
+                            path=file_path, reason=f"plan error: {outcome['error']}"
+                        )
+                    )
+                    continue
+                chunks = outcome
+                plans.append(
+                    (file_path, file_type, file_sha256, chunks, existing_point_ids)
+                )
+        elif subprocess_batch:
+            # ``vlm_client`` was provided directly (tests), or no factory
+            # was registered at all. Plan in-process the old way.
+            for file_path, file_sha256, file_type in subprocess_batch:
+                existing_by_path = {
+                    fp: existing for fp, _ft, _sha, existing in stale_plan_targets
+                }
                 try:
-                    ensure = getattr(self.embedder, "ensure_loaded", None)
-                    if ensure is not None:
-                        logger.info("Loading ColQwen3 embedder for embed phase ...")
-                        ensure()
+                    chunks = self._plan_chunks(file_path, file_type, file_sha256)
+                    plans.append(
+                        (file_path, file_type, file_sha256, chunks,
+                         existing_by_path.get(file_path, []))
+                    )
                 except Exception as exc:
-                    logger.warning("Embedder load failed: %s", exc)
+                    logger.warning("Plan error on %s: %s", file_path, exc)
+                    inner_skipped.append(
+                        SkippedFile(path=file_path, reason=f"plan error: {exc}")
+                    )
+
+        # After the subprocess (or in-process stub) plan is done, make
+        # sure the embedder is loaded for the embed phase.
+        try:
+            ensure = getattr(self.embedder, "ensure_loaded", None)
+            if ensure is not None:
+                logger.info("Loading ColQwen3 embedder for embed phase ...")
+                ensure()
+        except Exception as exc:
+            logger.warning("Embedder load failed: %s", exc)
 
         # --- Embed + upsert phase (embedder loaded, VLM gone) ------------
         for file_path, file_type, file_sha256, chunks, existing_point_ids in plans:
@@ -429,6 +434,15 @@ class IngestManager:
         # ---- Text point --------------------------------------------------
         text_payload_id = str(uuid.uuid4())
         text_content = self._chunk_text_content(chunk, file_type, page_texts, file_path)
+        # Cap the text payload so we do not OOM the embedder on a topic
+        # that spans many pages. ColQwen3's retrieval quality does not
+        # need the entire topic body — the multivector still resolves
+        # the query against the most representative ~1000 tokens. Hard
+        # cap in characters (UTF-8) because the embedder's own
+        # tokenizer truncation point is higher than this card can fit.
+        max_text_chars = getattr(self.settings, "embed_text_max_chars", 3200)
+        if len(text_content) > max_text_chars:
+            text_content = text_content[:max_text_chars]
         if text_content.strip():
             try:
                 vec = self.embedder.embed_text_chunks([text_content])[0]

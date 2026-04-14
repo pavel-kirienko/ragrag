@@ -174,21 +174,36 @@ class VLMTopicClient:
     ) -> str:
         """Compact prompt used when the window contains exactly one page.
 
-        The default stride is 1, so this is the hot path. We keep the
-        schema minimal (single-level JSON, terse field names) so the VLM
-        can answer in well under 256 tokens.
+        The default stride is 1, so this is the hot path. The schema is
+        deliberately terse (one-level JSON, single-char field names) so
+        the VLM's answer fits in well under 256 output tokens.
         """
-        running = ", ".join(f"{tid}={title[:40]!r}" for tid, title in running_topics.items()) or "none"
+        running = (
+            ", ".join(f"{tid}={title[:40]!r}" for tid, title in running_topics.items())
+            or "none yet"
+        )
         return (
-            f"Page {page} of a technical document. Identify which topic(s) this page belongs to.\n"
-            f"Open topics from earlier in the doc: {running}\n"
-            f"Cap: {max_topics_per_call} new topics per call.\n\n"
-            f'Respond with ONE line of JSON (no prose, no fences):\n'
-            f'{{"topics":[{{"id":"tN","c":false,"t":"title","s":"summary"}}]}}\n'
-            f'Fields: id unique; c=true means continuation of an existing id '
-            f'(t/s optional then); t = title under 80 chars; s = summary under 150 chars.\n\n'
-            f"Native text of page {page}:\n"
-            f"{_truncate(text, 1200)}"
+            f'You are segmenting a technical document into topic chunks. Below is '
+            f"page {page}. Decide which topic(s) this page belongs to.\n\n"
+            f"Rules:\n"
+            f"- A topic is a coherent subject (e.g. 'ADC electrical characteristics', "
+            f"'Pinout description', 'Package dimensions').\n"
+            f"- A page may belong to multiple topics.\n"
+            f"- Reuse the id of an existing topic from the list below if the page is "
+            f"a continuation. Continuations omit t and s.\n"
+            f"- Invent a new id (like 't12', 't13') for a brand-new topic, and give "
+            f"it a real descriptive title and one-sentence summary.\n"
+            f"- Up to {max_topics_per_call} new topics per page.\n\n"
+            f"Open topics from earlier: {running}\n\n"
+            f'Output format (JSON, one line, NO prose, NO markdown fences):\n'
+            f'{{"topics":[{{"id":"<id>","c":<bool>,"t":"<real title>","s":"<real summary>"}}]}}\n\n'
+            f"Worked example for the first page of an STM32 datasheet:\n"
+            f'{{"topics":[{{"id":"t1","c":false,"t":"STM32H743 feature overview","s":'
+            f'"Introduces the chip family, Cortex-M7 core, peripherals, and package options."}}]}}\n\n'
+            f"Now describe THIS page:\n"
+            f"---\n"
+            f"{_truncate(text, 1200)}\n"
+            f"---"
         )
 
     @staticmethod

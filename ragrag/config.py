@@ -43,6 +43,14 @@ class Settings(BaseModel):
         default=8, ge=1, le=64,
         description="Number of text chunks embedded per forward pass.",
     )
+    embed_text_max_chars: int = Field(
+        default=3200, ge=256, le=32768,
+        description="Hard cap on the number of characters fed to the "
+                    "text embedder per chunk. A topic spanning many "
+                    "pages can exceed ColQwen3's activation budget on "
+                    "tight GPUs (8 GB with bnb 4-bit weights); "
+                    "truncating to ~800 tokens keeps retrieval stable.",
+    )
 
     # VLM topic chunker (Phase B)
     vlm_model_id: str = Field(
