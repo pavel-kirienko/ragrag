@@ -34,16 +34,58 @@ def _load(path: Path) -> dict:
         return json.load(f)
 
 
+def _print_matrix(summaries: list[tuple[str, dict]], markdown: bool) -> int:
+    """Print a metric-x-phase matrix when more than two reports are given."""
+    labels = [label for _, label, _ in METRICS]
+    header_names = [name for name, _ in summaries]
+    if markdown:
+        print("| Metric | " + " | ".join(header_names) + " |")
+        print("|---|" + "|".join([":---:"] * len(header_names)) + "|")
+        for key, label, direction in METRICS:
+            row = f"| {label} | "
+            cells: list[str] = []
+            for _name, summary in summaries:
+                v = float(summary.get(key) or 0)
+                cells.append(f"{v:.3f}")
+            print(row + " | ".join(cells) + " |")
+    else:
+        header = f"{'METRIC':22}" + "".join(f"{n:>14}" for n in header_names)
+        print(header)
+        print("-" * len(header))
+        for key, label, direction in METRICS:
+            cells: list[str] = []
+            for _name, summary in summaries:
+                v = float(summary.get(key) or 0)
+                cells.append(f"{v:>14.3f}")
+            print(f"{label:22}" + "".join(cells))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Diff two ragrag benchmark reports.")
-    parser.add_argument("a", type=Path)
-    parser.add_argument("b", type=Path)
+    parser.add_argument("a", type=Path, nargs="?")
+    parser.add_argument("b", type=Path, nargs="?")
     parser.add_argument(
         "--markdown",
         action="store_true",
         help="Print a Markdown table suitable for PR bodies.",
     )
+    parser.add_argument(
+        "--matrix",
+        type=Path,
+        nargs="+",
+        help="Print a metric-x-phase matrix for 2+ reports in order.",
+    )
     args = parser.parse_args()
+
+    if args.matrix:
+        summaries = [
+            (p.stem, _load(p).get("summary", {})) for p in args.matrix
+        ]
+        return _print_matrix(summaries, args.markdown)
+
+    if not args.a or not args.b:
+        parser.error("two positional reports required unless --matrix is given")
 
     summary_a = _load(args.a).get("summary", {})
     summary_b = _load(args.b).get("summary", {})

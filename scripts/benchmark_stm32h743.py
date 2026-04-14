@@ -253,6 +253,11 @@ def main() -> int:
     ap.add_argument("--cli", default="ragrag", help="Path to ragrag CLI (default: from PATH).")
     ap.add_argument("--top-k", type=int, default=10)
     ap.add_argument("--reset", action="store_true", help="Delete .ragrag in index dir before running.")
+    ap.add_argument(
+        "--warm-only",
+        action="store_true",
+        help="Skip the cold-index call; assume the .ragrag directory is already built.",
+    )
     args = ap.parse_args()
 
     index_dir = Path(args.index_dir)
@@ -268,17 +273,28 @@ def main() -> int:
             print(f"Resetting {ragrag_dir}", flush=True)
             shutil.rmtree(ragrag_dir)
 
-    needs_new = not (index_dir / ".ragrag").exists()
-    print(f"Cold call (indexing if needed) — needs_new={needs_new}", flush=True)
-    cold_args = ["warmup query", "--top-k", str(args.top_k), "--log-level", "INFO"]
-    if needs_new:
-        cold_args.append("--new")
-    try:
-        cold_resp, index_wall, _ = run_ragrag(args.cli, index_dir, cold_args, timeout=7200)
-    except subprocess.CalledProcessError:
-        return 2
-    cold_indexing_ms = int((cold_resp.get("timing_ms") or {}).get("indexing_ms", 0))
-    print(f"  cold wall {index_wall:.1f}s; indexing_ms={cold_indexing_ms}", flush=True)
+    if args.warm_only:
+        if not (index_dir / ".ragrag").exists():
+            print(
+                f"--warm-only requires an existing index at {index_dir}/.ragrag",
+                file=sys.stderr, flush=True,
+            )
+            return 2
+        print("Warm-only mode: assuming .ragrag is already populated", flush=True)
+        index_wall = 0.0
+        cold_indexing_ms = 0
+    else:
+        needs_new = not (index_dir / ".ragrag").exists()
+        print(f"Cold call (indexing if needed) — needs_new={needs_new}", flush=True)
+        cold_args = ["warmup query", "--top-k", str(args.top_k), "--log-level", "INFO"]
+        if needs_new:
+            cold_args.append("--new")
+        try:
+            cold_resp, index_wall, _ = run_ragrag(args.cli, index_dir, cold_args, timeout=7200)
+        except subprocess.CalledProcessError:
+            return 2
+        cold_indexing_ms = int((cold_resp.get("timing_ms") or {}).get("indexing_ms", 0))
+        print(f"  cold wall {index_wall:.1f}s; indexing_ms={cold_indexing_ms}", flush=True)
 
     rows = []
     print(f"Running {len(QUESTIONS)} queries...", flush=True)
