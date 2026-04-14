@@ -47,7 +47,7 @@ from ragrag.models import (
 from ragrag.path_discovery import discover_files
 
 
-VLMFactory = Callable[[], VLMTopicClient]
+VLMFactory = Callable[..., VLMTopicClient]
 
 
 logger = logging.getLogger(__name__)
@@ -121,33 +121,49 @@ class IngestManager:
             and self.vlm_client is None
             and self._vlm_factory is not None
         ):
-            # Two-pass memory discipline: the VLM is ~2.5 GB and ColQwen3 is
-            # also ~2.5 GB; together they don't fit alongside the desktop on
-            # an 8 GB card. Unload the embedder before we start loading the
-            # VLM, then reload it once the plan phase finishes. ColQwen3
-            # reload from the HF cache is ~10-15 s.
+            # Decide where the VLM is going to live BEFORE unloading anything.
+            # On a tight 8 GB card with a busy desktop, the VLM has to run on
+            # CPU — and in that case we don't swap out the embedder, so the
+            # embed phase doesn't have to survive a bnb 4-bit reload (which
+            # is flaky when the allocator is fragmented).
             try:
-                logger.info("Unloading ColQwen3 embedder to free VRAM for VLM ...")
-                self.embedder.unload()
-                embedder_was_unloaded = True
-                # bnb's 4-bit state dicts leave fragmented blocks in the
-                # torch allocator even after empty_cache. Force a second
-                # collection pass so the free-VRAM poll in load_vlm sees
-                # the real free amount.
-                try:
-                    import gc
-                    gc.collect()
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                except Exception:
-                    pass
+                from ragrag.embedding.vlm_loader import plan_vlm_placement
+
+                placement = plan_vlm_placement()
             except Exception as exc:
-                logger.warning("Embedder unload failed: %s", exc)
+                logger.warning("VLM placement probe failed: %s; defaulting to cpu", exc)
+                placement = "cpu"
+            logger.info("VLM placement decision: %s", placement)
+
+            if placement == "cuda_swap":
+                try:
+                    logger.info("Unloading ColQwen3 embedder to free VRAM for VLM ...")
+                    self.embedder.unload()
+                    embedder_was_unloaded = True
+                    try:
+                        import gc
+                        gc.collect()
+                        import torch
+
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    logger.warning("Embedder unload failed: %s", exc)
+
+            forced_device = {
+                "cuda_coexist": "cuda",
+                "cuda_swap": "cuda",
+                "cpu": "cpu",
+            }.get(placement)
             try:
-                logger.info("Loading VLM topic client for indexing pass ...")
-                loaded_vlm_client = self._vlm_factory()
+                logger.info(
+                    "Loading VLM topic client for indexing pass (device=%s) ...",
+                    forced_device,
+                )
+                loaded_vlm_client = self._vlm_factory(device=forced_device)
                 self.vlm_client = loaded_vlm_client
             except Exception as exc:
                 logger.warning("VLM topic client load failed: %s", exc)

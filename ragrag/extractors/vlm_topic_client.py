@@ -80,9 +80,20 @@ class _VLMHandleLike(Protocol):
 class VLMTopicClient:
     """Narrow interface: produce topic assignments from a VLM."""
 
-    def __init__(self, handle: _VLMHandleLike, *, max_retries: int = 3) -> None:
+    def __init__(
+        self,
+        handle: _VLMHandleLike,
+        *,
+        max_retries: int = 3,
+        image_max_side: int = 896,
+        pdf_max_new_tokens: int = 256,
+        text_max_new_tokens: int = 512,
+    ) -> None:
         self.handle = handle
         self.max_retries = int(max_retries)
+        self.image_max_side = int(image_max_side)
+        self.pdf_max_new_tokens = int(pdf_max_new_tokens)
+        self.text_max_new_tokens = int(text_max_new_tokens)
 
     # -------- PDF path ------------------------------------------------- #
 
@@ -113,13 +124,27 @@ class VLMTopicClient:
 
         prompt = self._build_pdf_prompt(window_pages, window_texts, running_topics, max_topics_per_call)
 
+        # On CPU the vision encoder is prohibitively slow (a 3-image window
+        # at 640 px is ~3000 image tokens × ~15 ms/token on bf16 CPU = ~45 s
+        # of prefill *per window*), so we fall back to a text-only prompt
+        # that trusts the native PDF text extracted by PyMuPDF. Datasheets
+        # are text-dominated so this is accurate in practice; for scanned
+        # or image-only PDFs the user should run on a CUDA host.
+        handle_device = str(getattr(self.handle, "device", "") or "").lower()
+        if handle_device == "cpu":
+            images_for_prompt: list[Any] | None = None
+        else:
+            images_for_prompt = [
+                _downscale_for_chunker(img, self.image_max_side) for img in window_images
+            ]
+
         last_error: Optional[Exception] = None
         for attempt in range(1, self.max_retries + 1):
             try:
                 raw = self.handle.generate(
                     prompt if attempt == 1 else _terser_pdf_retry(prompt, attempt),
-                    images=window_images,
-                    max_new_tokens=512,
+                    images=images_for_prompt,
+                    max_new_tokens=self.pdf_max_new_tokens,
                     temperature=0.0,
                 )
                 parsed = _parse_pdf_topic_json(raw, window_pages, max_topics_per_call)
@@ -213,7 +238,7 @@ Native text for each page:
                 raw = self.handle.generate(
                     prompt if attempt == 1 else _terser_text_retry(prompt, attempt),
                     images=None,
-                    max_new_tokens=768,
+                    max_new_tokens=self.text_max_new_tokens,
                     temperature=0.0,
                 )
                 topics = _parse_text_topic_json(raw, content, absolute_line_offset)
@@ -409,3 +434,34 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def _downscale_for_chunker(image: Any, max_side: int) -> Any:
+    """Return a resized copy of a PIL image with longest side <= ``max_side``.
+
+    The topic chunker only needs to see layout and headings, not fine-grained
+    datasheet figures, so we downscale aggressively to keep the VLM's vision
+    encoder activation footprint small on tight GPUs. Non-PIL inputs (e.g.
+    test stubs) are passed through untouched.
+    """
+    try:
+        width, height = image.size  # PIL duck-typing
+    except AttributeError:
+        return image
+    longest = max(width, height)
+    if longest <= max_side:
+        return image
+    scale = max_side / float(longest)
+    new_size = (max(1, int(round(width * scale))), max(1, int(round(height * scale))))
+    try:
+        from PIL import Image
+
+        resample = Image.Resampling.LANCZOS
+    except Exception:
+        resample = None
+    try:
+        if resample is not None:
+            return image.resize(new_size, resample)
+        return image.resize(new_size)
+    except Exception:
+        return image

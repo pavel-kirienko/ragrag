@@ -58,11 +58,21 @@ class Settings(BaseModel):
         description="Max tokens per VLM prompt for the text topic segmenter.",
     )
     chunker_stride_pages: int = Field(
-        default=3, ge=1, le=32,
+        default=1, ge=1, le=32,
         description="Pages per VLM call for the PDF topic chunker. Smaller "
-                    "values keep activation memory lower on tight GPUs (3 is "
-                    "the ceiling on an 8 GB card); larger values give the "
-                    "VLM more cross-page context on larger GPUs.",
+                    "values keep activation memory lower on tight GPUs: "
+                    "stride=1 fits under an 8 GB ceiling even with a busy "
+                    "X11 desktop holding ~3 GB. Larger values give the VLM "
+                    "more cross-page context on bigger GPUs.",
+    )
+    chunker_vlm_image_max_side: int = Field(
+        default=448, ge=256, le=2048,
+        description="Max image side (pixels) fed to the VLM topic chunker. "
+                    "The embedder always sees full-resolution pages (DPI "
+                    "setting); the chunker only needs thumbnails to spot "
+                    "topic boundaries. 448 px ~= 512 visual tokens per "
+                    "image, which keeps vision-encoder activations under "
+                    "~300 MiB on 8 GB GPUs.",
     )
     chunker_max_topics_per_call: int = Field(
         default=16, ge=1, le=64,

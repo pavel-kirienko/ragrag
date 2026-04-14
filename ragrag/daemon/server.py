@@ -23,12 +23,17 @@ The protocol surface (methods accepted) lives in ``Dispatcher.methods``.
 """
 from __future__ import annotations
 
+import os
+
+# Must be set before any transitive torch import. Reduces CUDA allocator
+# fragmentation during the two-pass indexing swap.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import argparse
 import errno
 import fcntl
 import json
 import logging
-import os
 import signal
 import socket
 import sys
@@ -141,20 +146,17 @@ class EngineCache:
         # VLM topic client loads LAZILY per indexing pass. Keeping it in
         # VRAM across calls would break search on 8 GB cards (ColQwen3 at
         # 2.5 GB + Qwen2.5-VL-3B at 2.5 GB + activations > 8 GB).
-        def _vlm_factory() -> VLMTopicClient:
-            import torch
-
-            forced_device = "cuda" if torch.cuda.is_available() else None
+        def _vlm_factory(device: str | None = None) -> VLMTopicClient:
             logger.info(
                 "Loading VLM topic client '%s' (device=%s) ...",
-                settings.vlm_model_id, forced_device or "auto",
+                settings.vlm_model_id, device or "auto",
             )
             handle = load_vlm(
                 settings.vlm_model_id,
                 quantization=settings.vlm_quantization,
-                device=forced_device,
+                device=device,
             )
-            return VLMTopicClient(handle)
+            return VLMTopicClient(handle, image_max_side=settings.chunker_vlm_image_max_side)
 
         store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
         ingest = IngestManager(

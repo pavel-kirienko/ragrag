@@ -133,6 +133,48 @@ def detect_device() -> str:
     return "cpu"
 
 
+def plan_vlm_placement(
+    *,
+    embedder_resident_mib: int = 2500,
+    vlm_alone_threshold_mib: int = 3500,
+    vlm_coexist_threshold_mib: int = 6000,
+) -> str:
+    """Decide whether the VLM should run on GPU (coexist / swap) or CPU.
+
+    Returns one of:
+      * ``"cuda_coexist"`` — enough free VRAM for the VLM alongside the
+        embedder; no swap needed.
+      * ``"cuda_swap"``    — not enough for both, but enough for the VLM
+        alone after unloading the embedder.
+      * ``"cpu"``          — not enough VRAM for the VLM even alone; the
+        caller should load the VLM on CPU and leave the embedder alone.
+
+    Thresholds are intentionally generous: Qwen2.5-VL-3B weights are
+    ~2.5 GB at 4-bit, cuBLAS workspace is another ~512 MB, and the vision
+    encoder needs ~1–2 GB of activations for a multi-image window. An
+    8 GB card with a busy X11 desktop holding ~1.5 GB typically ends up
+    with ~4–4.5 GB free after the embedder unload, which is right on the
+    edge — so we err on the side of CPU to keep the indexing pass from
+    crashing mid-run.
+    """
+    try:
+        import torch
+    except Exception:
+        return "cpu"
+    if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        free_mib = torch.cuda.mem_get_info(0)[0] // (1024 * 1024)
+    except Exception:
+        return "cpu"
+    if free_mib >= vlm_coexist_threshold_mib:
+        return "cuda_coexist"
+    hypothetical_free_after_unload = free_mib + embedder_resident_mib
+    if hypothetical_free_after_unload >= vlm_alone_threshold_mib:
+        return "cuda_swap"
+    return "cpu"
+
+
 def resolve_quantization(setting: str, device: str) -> str:
     """Pick a quantization strategy for the VLM.
 
@@ -153,7 +195,7 @@ def load_vlm(
     *,
     quantization: str = "auto",
     device: str | None = None,
-    min_free_vram_mib: int = 3072,
+    min_free_vram_mib: int = 3200,
 ) -> VLMHandle:
     """Load a vision-language model. Returns a ready-to-use ``VLMHandle``.
 
@@ -227,6 +269,13 @@ def load_vlm(
     kwargs: dict[str, Any] = {
         "trust_remote_code": True,
         "low_cpu_mem_usage": True,
+        # Force the eager attention implementation so we don't depend on a
+        # cuDNN / flash-attn kernel being registered for the bnb 4-bit
+        # compute-dtype combo. The older RTX 30 series + recent cuDNN builds
+        # throw "was unable to find an engine to execute this computation"
+        # when SDPA tries to dispatch the vision encoder at bf16, and the
+        # eager path avoids the whole fused-kernel lookup.
+        "attn_implementation": "eager",
     }
     if quantization_config is not None:
         kwargs["quantization_config"] = quantization_config

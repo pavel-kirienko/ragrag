@@ -7,8 +7,14 @@ import logging
 import os
 import sys
 
-from ragrag import __version__
-from ragrag.config import find_index_root, get_settings
+# Enable expandable segments in torch's CUDA allocator. Must be set BEFORE
+# torch is imported anywhere. Reduces fragmentation when the same process
+# loads/unloads several large models (ColQwen3 <-> Qwen2.5-VL-3B swap during
+# two-pass indexing on 8 GB GPUs).
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+from ragrag import __version__  # noqa: E402
+from ragrag.config import find_index_root, get_settings  # noqa: E402
 
 
 _DESCRIPTION = (
@@ -352,20 +358,17 @@ def _run_inprocess(args, settings) -> int:
 
     # VLM topic client is loaded lazily per indexing call via a factory,
     # so searches over an already-indexed corpus never pay the VLM load cost.
-    def _vlm_factory() -> VLMTopicClient:
-        import torch
-
-        forced_device = "cuda" if torch.cuda.is_available() else None
+    def _vlm_factory(device: str | None = None) -> VLMTopicClient:
         logging.info(
             "Loading VLM topic client '%s' (device=%s) ...",
-            settings.vlm_model_id, forced_device or "auto",
+            settings.vlm_model_id, device or "auto",
         )
         handle = load_vlm(
             settings.vlm_model_id,
             quantization=settings.vlm_quantization,
-            device=forced_device,
+            device=device,
         )
-        return VLMTopicClient(handle)
+        return VLMTopicClient(handle, image_max_side=settings.chunker_vlm_image_max_side)
 
     logging.info("Opening local vector store...")
     store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
