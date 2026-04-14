@@ -27,7 +27,8 @@ import os
 
 # Must be set before any transitive torch import. Reduces CUDA allocator
 # fragmentation during the two-pass indexing swap.
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 import argparse
 import errno
@@ -134,14 +135,13 @@ class EngineCache:
         from ragrag.retrieval.search_engine import SearchEngine
 
         settings = self._settings_factory(index_path)
-        logger.info("Loading ColQwen3 for index %s ...", index_path)
-        t0 = time.time()
+        logger.info("Constructing ColQwen3 handle for index %s (deferred load) ...", index_path)
         embedder = ColQwenEmbedder(
             settings.model_id,
             settings.max_visual_tokens,
             quantization=settings.quantization,
+            defer_load=True,
         )
-        logger.info("ColQwen3 embedder ready in %.1fs", time.time() - t0)
 
         # VLM topic client loads LAZILY per indexing pass. Keeping it in
         # VRAM across calls would break search on 8 GB cards (ColQwen3 at

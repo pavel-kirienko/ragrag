@@ -54,18 +54,33 @@ class ColQwenEmbedder:
         model_id: str,
         max_visual_tokens: int = 16384,
         quantization: str = "auto",
+        *,
+        defer_load: bool = False,
     ):
-        """Load model and processor. Takes ~2-5 min on CPU with swap."""
-        # Remember init args so ``reload()`` can rebuild without the
-        # caller having to pass them again.
+        """Load model and processor. Takes ~2-5 min on CPU with swap.
+
+        When ``defer_load=True`` the heavy weights are not read until the
+        first call to :meth:`ensure_loaded` (or the first explicit
+        :meth:`reload`). The CLI uses this so the first ingest can load
+        the VLM topic chunker into a fresh CUDA context, then tear it
+        down, then load the embedder — avoiding a bnb-fragmented
+        allocator that silently OOMs the embedder's forward pass.
+        """
         self.model_id = model_id
         self.max_visual_tokens = int(max_visual_tokens)
         self.quantization = quantization
         self.model = None
         self.processor = None
-        self._load()
+        self.device = None
+        if not defer_load:
+            self._load(is_reload=False)
 
-    def _load(self) -> None:
+    def ensure_loaded(self) -> None:
+        """Load the model if it has not been loaded yet. Idempotent."""
+        if self.model is None:
+            self._load(is_reload=False)
+
+    def _load(self, *, is_reload: bool = False) -> None:
         """Load model + processor. Used by __init__ and reload()."""
         model_id = self.model_id
         max_visual_tokens = self.max_visual_tokens
@@ -131,15 +146,16 @@ class ColQwenEmbedder:
                 if device == "mps":
                     model = AutoModel.from_pretrained(model_id, **kwargs).eval().to("mps")
                 elif device == "cuda":
-                    # device_map="auto" lets accelerate spill layers that don't fit
-                    # in VRAM onto CPU/disk instead of OOMing. On a small GPU this is
-                    # the difference between partial GPU acceleration and pure CPU.
-                    free_vram_mib = torch.cuda.mem_get_info(0)[0] // 1024**2
-                    max_mem_mib = max(free_vram_mib - 512, 1024)
+                    # Force every module onto cuda:0. ``device_map="auto"``
+                    # consults torch's allocator to decide whether a layer
+                    # fits, and bnb 4-bit leaves non-PyTorch CUDA context
+                    # state behind after previous loads, which makes
+                    # free-VRAM accounting unreliable. A hard placement
+                    # produces a clean OOM if the model really cannot fit,
+                    # which we catch below and fall back to CPU.
                     model = AutoModel.from_pretrained(
                         model_id,
-                        device_map="auto",
-                        max_memory={0: f"{max_mem_mib}MiB", "cpu": "24GiB"},
+                        device_map={"": "cuda:0"},
                         **kwargs,
                     ).eval()
                 else:
@@ -269,4 +285,4 @@ class ColQwenEmbedder:
         """Re-run the load path using the original init args. Idempotent."""
         if self.model is not None:
             return
-        self._load()
+        self._load(is_reload=True)

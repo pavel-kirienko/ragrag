@@ -86,8 +86,8 @@ class VLMTopicClient:
         *,
         max_retries: int = 3,
         image_max_side: int = 896,
-        pdf_max_new_tokens: int = 256,
-        text_max_new_tokens: int = 512,
+        pdf_max_new_tokens: int = 384,
+        text_max_new_tokens: int = 768,
     ) -> None:
         self.handle = handle
         self.max_retries = int(max_retries)
@@ -122,7 +122,12 @@ class VLMTopicClient:
         if len(window_pages) != len(window_images) or len(window_pages) != len(window_texts):
             raise ValueError("window_pages / window_images / window_texts must be the same length")
 
-        prompt = self._build_pdf_prompt(window_pages, window_texts, running_topics, max_topics_per_call)
+        if len(window_pages) == 1:
+            prompt = self._build_pdf_prompt_single(
+                window_pages[0], window_texts[0], running_topics, max_topics_per_call
+            )
+        else:
+            prompt = self._build_pdf_prompt(window_pages, window_texts, running_topics, max_topics_per_call)
 
         # On CPU the vision encoder is prohibitively slow (a 3-image window
         # at 640 px is ~3000 image tokens × ~15 ms/token on bf16 CPU = ~45 s
@@ -158,6 +163,32 @@ class VLMTopicClient:
         raise VLMTopicClientError(
             f"VLM failed to produce valid PDF topic JSON after {self.max_retries} attempts "
             f"(pages {window_pages[0]}-{window_pages[-1]}): {last_error}"
+        )
+
+    @staticmethod
+    def _build_pdf_prompt_single(
+        page: int,
+        text: str,
+        running_topics: dict[str, str],
+        max_topics_per_call: int,
+    ) -> str:
+        """Compact prompt used when the window contains exactly one page.
+
+        The default stride is 1, so this is the hot path. We keep the
+        schema minimal (single-level JSON, terse field names) so the VLM
+        can answer in well under 256 tokens.
+        """
+        running = ", ".join(f"{tid}={title[:40]!r}" for tid, title in running_topics.items()) or "none"
+        return (
+            f"Page {page} of a technical document. Identify which topic(s) this page belongs to.\n"
+            f"Open topics from earlier in the doc: {running}\n"
+            f"Cap: {max_topics_per_call} new topics per call.\n\n"
+            f'Respond with ONE line of JSON (no prose, no fences):\n'
+            f'{{"topics":[{{"id":"tN","c":false,"t":"title","s":"summary"}}]}}\n'
+            f'Fields: id unique; c=true means continuation of an existing id '
+            f'(t/s optional then); t = title under 80 chars; s = summary under 150 chars.\n\n'
+            f"Native text of page {page}:\n"
+            f"{_truncate(text, 1200)}"
         )
 
     @staticmethod
@@ -323,9 +354,14 @@ def _parse_pdf_topic_json(
     max_topics: int,
 ) -> list[PdfTopicAssignment]:
     blob = _extract_json_block(raw, "{")
-    payload = json.loads(blob)
+    payload = _loads_with_salvage(blob)
     if not isinstance(payload, dict):
         raise ValueError("pdf topic response must be a JSON object")
+
+    # Compact single-page schema: {"topics":[{"id":"tN","c":false,"t":"","s":""}]}
+    if len(window_pages) == 1 and "topics" in payload and "pages" not in payload:
+        return _parse_compact_pdf_response(payload, window_pages[0], max_topics)
+
     pages = payload.get("pages")
     if not isinstance(pages, list):
         raise ValueError("pdf topic response missing 'pages' list")
@@ -373,13 +409,127 @@ def _parse_pdf_topic_json(
     return assignments
 
 
+def _parse_compact_pdf_response(
+    payload: dict,
+    page_num: int,
+    max_topics: int,
+) -> list[PdfTopicAssignment]:
+    topics = payload.get("topics")
+    if not isinstance(topics, list):
+        raise ValueError("compact pdf topic response missing 'topics' list")
+    new_titles: set[str] = set()
+    assignments: list[PdfTopicAssignment] = []
+    for t in topics:
+        if not isinstance(t, dict):
+            continue
+        topic_id = t.get("id")
+        if not isinstance(topic_id, str) or not topic_id:
+            continue
+        is_continuation = bool(t.get("c", False))
+        title = str(t.get("t") or "").strip()
+        summary = str(t.get("s") or "").strip()
+        if not is_continuation and title and title not in new_titles:
+            if len(new_titles) >= max_topics:
+                continue
+            new_titles.add(title)
+        assignments.append(
+            PdfTopicAssignment(
+                page=page_num,
+                topic_id=topic_id,
+                is_continuation=is_continuation,
+                title=title,
+                summary=summary,
+            )
+        )
+    if not assignments:
+        raise ValueError("compact pdf topic response had no usable topics")
+    return assignments
+
+
+def _loads_with_salvage(blob: str) -> Any:
+    """Parse JSON, or salvage a truncated object/array by closing it.
+
+    VLM generations sometimes hit ``max_new_tokens`` mid-object. Rather
+    than retrying at higher cost we backtrack the blob to the last
+    balanced point and append the closing brackets that the parser
+    would have expected. If salvage still fails, we re-raise the
+    original exception.
+    """
+    try:
+        return json.loads(blob)
+    except json.JSONDecodeError as exc:
+        # Walk the blob tracking depth; cut at the deepest point where
+        # we have a well-formed prefix, then close it.
+        last_good: int | None = None
+        depth_stack: list[str] = []
+        in_str = False
+        escape = False
+        for i, ch in enumerate(blob):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch in "[{":
+                depth_stack.append(ch)
+            elif ch in "]}":
+                if depth_stack:
+                    depth_stack.pop()
+                if not depth_stack:
+                    last_good = i + 1
+            elif ch == "," and depth_stack:
+                # Mark that we can safely truncate here and close the
+                # remaining open scopes — a trailing comma is invalid
+                # in JSON so we'll also need to strip it.
+                last_good = i
+        if last_good is None:
+            raise exc
+        fragment = blob[:last_good].rstrip().rstrip(",")
+        # Close any still-open scopes.
+        closing = []
+        temp_stack = []
+        in_str = False
+        escape = False
+        for ch in fragment:
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch in "[{":
+                temp_stack.append(ch)
+            elif ch in "]}":
+                if temp_stack:
+                    temp_stack.pop()
+        while temp_stack:
+            opener = temp_stack.pop()
+            closing.append("]" if opener == "[" else "}")
+        salvaged = fragment + "".join(closing)
+        try:
+            return json.loads(salvaged)
+        except json.JSONDecodeError:
+            raise exc
+
+
 def _parse_text_topic_json(
     raw: str,
     content: str,
     absolute_line_offset: int,
 ) -> list[TextTopic]:
     blob = _extract_json_block(raw, "[")
-    payload = json.loads(blob)
+    payload = _loads_with_salvage(blob)
     if not isinstance(payload, list):
         raise ValueError("text topic response must be a JSON array")
 

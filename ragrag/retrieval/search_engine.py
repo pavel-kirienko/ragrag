@@ -173,6 +173,9 @@ class SearchEngine:
         # ------------------------------------------------------------------
         t0 = time.time()
         try:
+            ensure = getattr(self.embedder, "ensure_loaded", None)
+            if ensure is not None:
+                ensure()
             query_vec = self.embedder.embed_query_text(request.query)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"Query embedding error: {exc}")

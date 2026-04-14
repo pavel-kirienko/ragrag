@@ -11,7 +11,11 @@ import sys
 # torch is imported anywhere. Reduces fragmentation when the same process
 # loads/unloads several large models (ColQwen3 <-> Qwen2.5-VL-3B swap during
 # two-pass indexing on 8 GB GPUs).
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+# Avoid 10-second HEAD requests to huggingface.co on every model load.
+# The ColQwen3 + Qwen2.5-VL weights are cached locally; if a user really
+# needs a fresh fetch they can unset these explicitly.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ragrag import __version__  # noqa: E402
 from ragrag.config import find_index_root, get_settings  # noqa: E402
@@ -350,10 +354,16 @@ def _run_inprocess(args, settings) -> int:
     fmt = _resolve_format(args)
 
     logging.info("Initializing model '%s' (first run may take a long time)...", settings.model_id)
+    # Defer the embedder load. On a tight 8 GB card the bnb 4-bit VLM
+    # leaves ~1.5 GiB of non-PyTorch CUDA context allocations behind
+    # after unload, which breaks a subsequent embedder reload. Loading
+    # the embedder only AFTER the VLM plan phase has finished avoids
+    # that entirely on the first ingest pass.
     embedder = ColQwenEmbedder(
         settings.model_id,
         settings.max_visual_tokens,
         quantization=settings.quantization,
+        defer_load=True,
     )
 
     # VLM topic client is loaded lazily per indexing call via a factory,

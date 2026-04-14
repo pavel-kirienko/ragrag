@@ -136,22 +136,31 @@ class IngestManager:
             logger.info("VLM placement decision: %s", placement)
 
             if placement == "cuda_swap":
-                try:
-                    logger.info("Unloading ColQwen3 embedder to free VRAM for VLM ...")
-                    self.embedder.unload()
-                    embedder_was_unloaded = True
+                # If the embedder was never loaded (defer_load=True at
+                # startup), we don't need to unload anything — the plan
+                # phase runs with a pristine CUDA context, then the
+                # embedder gets its first load from scratch after the
+                # VLM unloads. That path is clean; reload-after-VLM is
+                # the fragile one.
+                if getattr(self.embedder, "is_loaded", True):
                     try:
-                        import gc
-                        gc.collect()
-                        import torch
+                        logger.info("Unloading ColQwen3 embedder to free VRAM for VLM ...")
+                        self.embedder.unload()
+                        embedder_was_unloaded = True
+                        try:
+                            import gc
+                            gc.collect()
+                            import torch
 
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                            torch.cuda.synchronize()
-                    except Exception:
-                        pass
-                except Exception as exc:
-                    logger.warning("Embedder unload failed: %s", exc)
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                                torch.cuda.synchronize()
+                        except Exception:
+                            pass
+                    except Exception as exc:
+                        logger.warning("Embedder unload failed: %s", exc)
+                else:
+                    logger.info("Embedder not yet loaded; skipping unload.")
 
             forced_device = {
                 "cuda_coexist": "cuda",
@@ -211,9 +220,6 @@ class IngestManager:
                 except Exception as exc:
                     logger.warning("VLM unload failed: %s", exc)
             if embedder_was_unloaded:
-                # Force torch to compact its allocator cache before reload —
-                # bnb 4-bit deletion leaves fragmented blocks that
-                # ``mem_get_info`` doesn't count as free until we flush.
                 try:
                     import gc
                     import torch
@@ -229,6 +235,18 @@ class IngestManager:
                     self.embedder.reload()
                 except Exception as exc:
                     logger.warning("Embedder reload failed: %s", exc)
+            else:
+                # Embedder was either never loaded (first ingest with
+                # defer_load=True) or we decided to keep it resident on
+                # CPU while the VLM ran. Ensure it is loaded before we
+                # try to embed anything.
+                try:
+                    ensure = getattr(self.embedder, "ensure_loaded", None)
+                    if ensure is not None:
+                        logger.info("Loading ColQwen3 embedder for embed phase ...")
+                        ensure()
+                except Exception as exc:
+                    logger.warning("Embedder load failed: %s", exc)
 
         # --- Embed + upsert phase (embedder loaded, VLM gone) ------------
         for file_path, file_type, file_sha256, chunks, existing_point_ids in plans:

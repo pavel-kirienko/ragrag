@@ -135,8 +135,8 @@ def detect_device() -> str:
 
 def plan_vlm_placement(
     *,
-    embedder_resident_mib: int = 2500,
-    vlm_alone_threshold_mib: int = 3500,
+    embedder_resident_mib: int = 3000,
+    vlm_alone_threshold_mib: int = 3000,
     vlm_coexist_threshold_mib: int = 6000,
 ) -> str:
     """Decide whether the VLM should run on GPU (coexist / swap) or CPU.
@@ -204,7 +204,17 @@ def load_vlm(
     ColQwen3 don't get evicted. Explicit ``device="cuda"`` bypasses this
     safety check.
     """
+    import os
+
+    # Prevent HF from making network HEAD requests on every load. The
+    # VLM weights are already in the local cache; blocking network I/O
+    # keeps startup snappy on flaky networks and avoids 60 s of 10-s
+    # timeouts stacking up through urllib3's retry policy.
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
     import torch
+    from huggingface_hub import try_to_load_from_cache
     from transformers import AutoProcessor
 
     explicit_device = device is not None
@@ -232,7 +242,21 @@ def load_vlm(
     logger.info("Loading VLM %s (device=%s, quant=%s)", model_id, chosen_device, quant)
     t0 = time.time()
 
-    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    cached_config = try_to_load_from_cache(model_id, "config.json")
+    prefer_local = isinstance(cached_config, str)
+    try:
+        processor = AutoProcessor.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+            local_files_only=prefer_local,
+        )
+    except (OSError, FileNotFoundError):
+        logger.warning("VLM processor cache incomplete; retrying with network fetch")
+        processor = AutoProcessor.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+            local_files_only=False,
+        )
 
     quantization_config = None
     if quant == "4bit" and chosen_device == "cuda":
@@ -286,7 +310,15 @@ def load_vlm(
     else:
         kwargs["dtype"] = torch.bfloat16  # CPU bf16 is fine on modern x86
 
-    model = _AutoModel.from_pretrained(model_id, **kwargs).eval()
+    try:
+        model = _AutoModel.from_pretrained(
+            model_id, local_files_only=prefer_local, **kwargs
+        ).eval()
+    except (OSError, FileNotFoundError):
+        logger.warning("VLM weights cache incomplete; retrying with network fetch")
+        model = _AutoModel.from_pretrained(
+            model_id, local_files_only=False, **kwargs
+        ).eval()
 
     handle = VLMHandle(
         model_id=model_id,
