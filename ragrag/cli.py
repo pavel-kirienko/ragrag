@@ -291,6 +291,8 @@ def _run_via_daemon(args, settings) -> int | None:
 def _run_inprocess(args, settings) -> int:
     """Original in-process search path. Used as fallback / explicit --no-daemon mode."""
     from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+    from ragrag.embedding.vlm_loader import load_vlm
+    from ragrag.extractors.vlm_topic_client import VLMTopicClient
     from ragrag.index.ingest_manager import IngestManager
     from ragrag.index.qdrant_store import QdrantStore, COLLECTION_NAME
     from ragrag.models import SearchRequest
@@ -307,9 +309,22 @@ def _run_inprocess(args, settings) -> int:
         quantization=settings.quantization,
     )
 
+    # Try to load the VLM topic client. If it fails we log and continue —
+    # existing indexes still work for search-only queries.
+    vlm_client = None
+    try:
+        logging.info("Loading VLM topic client '%s' ...", settings.vlm_model_id)
+        handle = load_vlm(settings.vlm_model_id, quantization=settings.vlm_quantization)
+        vlm_client = VLMTopicClient(handle)
+    except Exception as exc:
+        logging.warning(
+            "VLM topic client unavailable (%s) — indexing new files will fail but existing "
+            "indexes are still searchable.", exc,
+        )
+
     logging.info("Opening local vector store...")
     store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
-    ingest_mgr = IngestManager(embedder, store, settings)
+    ingest_mgr = IngestManager(embedder, store, settings, vlm_client=vlm_client)
     engine = SearchEngine(embedder, store, ingest_mgr, settings)
 
     request = SearchRequest(

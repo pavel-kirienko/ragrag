@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from ragrag.config import Settings
+from ragrag.extractors.vlm_topic_client import PdfTopicAssignment, TextTopic, VLMTopicClient
 from ragrag.index.ingest_manager import IngestManager
 from ragrag.index.qdrant_store import QdrantStore
 from ragrag.models import SearchRequest
@@ -32,13 +33,51 @@ class MockEmbedder:
         return [self.embed_image(img) for img in images]
 
 
+class _StubHandle:
+    def generate(self, *a, **kw):
+        raise NotImplementedError
+
+
+class _AllInOneVLMClient(VLMTopicClient):
+    """Deterministic stub — one topic per file. Matches tests/test_ingest.py."""
+
+    def __init__(self) -> None:
+        super().__init__(_StubHandle())
+
+    def identify_pdf_topics(self, window_pages, window_images, window_texts, running_topics, *, max_topics_per_call=16):
+        is_new = "t1" not in running_topics
+        return [
+            PdfTopicAssignment(
+                page=p, topic_id="t1", is_continuation=not is_new,
+                title="" if not is_new else "Stub topic",
+                summary="single topic",
+            )
+            for p in window_pages
+        ]
+
+    def identify_text_topics(self, content, *, language_hint="text", absolute_line_offset=0):
+        n_lines = content.count("\n") + 1
+        return [
+            TextTopic(
+                title=f"Stub {language_hint} topic",
+                summary="single topic",
+                ranges=[(absolute_line_offset + 1, absolute_line_offset + max(1, n_lines))],
+            )
+        ]
+
+
 def _build_engine(tmp_path: Path, *, embedder: MockEmbedder | None = None) -> tuple[SearchEngine, IngestManager]:
     settings = Settings(index_path=str(tmp_path / ".ragrag"))
     (tmp_path / ".ragrag").mkdir(parents=True, exist_ok=True)
 
     active_embedder = embedder or MockEmbedder()
     store = QdrantStore(path=str(tmp_path / ".ragrag"), collection_name="test", embedding_dim=4)
-    ingest_manager = IngestManager(cast(Any, active_embedder), store, settings)
+    ingest_manager = IngestManager(
+        cast(Any, active_embedder),
+        store,
+        settings,
+        vlm_client=_AllInOneVLMClient(),
+    )
     search_engine = SearchEngine(cast(Any, active_embedder), store, ingest_manager, settings)
     return search_engine, ingest_manager
 

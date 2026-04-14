@@ -44,6 +44,42 @@ class Settings(BaseModel):
         description="Number of text chunks embedded per forward pass.",
     )
 
+    # VLM topic chunker (Phase B)
+    vlm_model_id: str = Field(
+        default="Qwen/Qwen2.5-VL-3B-Instruct",
+        description="HuggingFace model ID for the topic chunker and reranker VLM.",
+    )
+    vlm_quantization: str = Field(
+        default="auto",
+        description="VLM weight quantization: 'auto' (4-bit on CUDA, bf16 on CPU), 'none', '4bit', '8bit'.",
+    )
+    chunker_vlm_ctx_tokens: int = Field(
+        default=8192, ge=512,
+        description="Max tokens per VLM prompt for the text topic segmenter.",
+    )
+    chunker_stride_pages: int = Field(
+        default=8, ge=1, le=32,
+        description="Pages per VLM call for the PDF topic chunker.",
+    )
+    chunker_max_topics_per_call: int = Field(
+        default=16, ge=1, le=64,
+        description="Safety cap on new topics emitted per VLM call.",
+    )
+    chunker_topic_cold_pages: int = Field(
+        default=20, ge=1,
+        description="Close a topic after this many pages without any reference.",
+    )
+
+    # Location builder (Phase B)
+    location_directory_listing_max: int = Field(
+        default=64, ge=1,
+        description="Max entries shown in Location.directory_listing; excess is head/tail split.",
+    )
+    location_respect_gitignore: bool = Field(
+        default=True,
+        description="Filter directory listings through the nearest .gitignore.",
+    )
+
     # Filesystem
     include_hidden: bool = Field(default=False, description="Include hidden files/dirs.")
     follow_symlinks: bool = Field(default=True, description="Follow symbolic links.")

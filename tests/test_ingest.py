@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 from ragrag.config import Settings
+from ragrag.extractors.vlm_topic_client import PdfTopicAssignment, TextTopic, VLMTopicClient
 from ragrag.index.ingest_manager import IngestManager
 from ragrag.index.qdrant_store import QdrantStore
 from ragrag.models import FileType, Modality
@@ -37,6 +38,43 @@ class MockEmbedder:
         return [self.embed_image(img) for img in images]
 
 
+class _StubHandle:
+    def generate(self, *a, **kw):
+        raise NotImplementedError  # stub subclass never hits the base
+
+
+class _AllInOneVLMClient(VLMTopicClient):
+    """Deterministic stub: every file is one topic, covering whatever pages or
+    lines are passed in. Used by the ingest tests to bypass the real VLM while
+    keeping the rest of the pipeline real."""
+
+    def __init__(self) -> None:
+        super().__init__(_StubHandle())
+
+    def identify_pdf_topics(self, window_pages, window_images, window_texts, running_topics, *, max_topics_per_call=16):
+        is_new = "t1" not in running_topics
+        return [
+            PdfTopicAssignment(
+                page=p,
+                topic_id="t1",
+                is_continuation=not is_new,
+                title="" if not is_new else "Stub topic",
+                summary="Single topic covering the whole file (stub VLM)",
+            )
+            for p in window_pages
+        ]
+
+    def identify_text_topics(self, content, *, language_hint="text", absolute_line_offset=0):
+        n_lines = content.count("\n") + 1
+        return [
+            TextTopic(
+                title=f"Stub {language_hint} topic",
+                summary="Single topic covering the whole file (stub VLM)",
+                ranges=[(absolute_line_offset + 1, absolute_line_offset + max(1, n_lines))],
+            )
+        ]
+
+
 def _build_manager(tmp_path: Path, *, indexing_timeout: float = 100000.0) -> IngestManager:
     index_path = tmp_path / ".ragrag"
     index_path.mkdir(parents=True, exist_ok=True)
@@ -46,7 +84,12 @@ def _build_manager(tmp_path: Path, *, indexing_timeout: float = 100000.0) -> Ing
         collection_name=f"ingest_test_{uuid.uuid4().hex}",
         embedding_dim=4,
     )
-    return IngestManager(cast(Any, MockEmbedder()), store, settings)
+    return IngestManager(
+        cast(Any, MockEmbedder()),
+        store,
+        settings,
+        vlm_client=_AllInOneVLMClient(),
+    )
 
 
 def _long_text() -> str:
@@ -195,76 +238,46 @@ def _build_manager_with_embedder(
         collection_name=f"ingest_test_{uuid.uuid4().hex}",
         embedding_dim=4,
     )
-    return IngestManager(cast(Any, embedder), store, settings)
+    return IngestManager(
+        cast(Any, embedder),
+        store,
+        settings,
+        vlm_client=_AllInOneVLMClient(),
+    )
 
 
-def test_ingest_batches_text_chunks(tmp_path: Path) -> None:
-    """Many text chunks collapse into full-sized batches plus a tail."""
-    # Craft content that will chunk into ~17 segments at chunk_size=200.
+def test_ingest_without_vlm_client_rejects_text_files(tmp_path: Path) -> None:
+    """Policy: no heuristic chunking without a VLM."""
+    text_file = tmp_path / "rejected.txt"
+    _ = text_file.write_text(_long_text(), encoding="utf-8")
+
+    index_path = tmp_path / ".ragrag"
+    index_path.mkdir(parents=True, exist_ok=True)
+    settings = Settings(index_path=str(index_path))
+    store = QdrantStore(
+        path=str(index_path),
+        collection_name=f"ingest_test_{uuid.uuid4().hex}",
+        embedding_dim=4,
+    )
+    mgr = IngestManager(cast(Any, MockEmbedder()), store, settings, vlm_client=None)
+    stats, skipped, _ = mgr.ingest_paths([str(text_file)])
+    assert stats.files_added == 0
+    assert any("VLM client" in item.reason for item in skipped)
+
+
+def test_ingest_embeds_text_topic_chunk(tmp_path: Path) -> None:
+    """The VLM stub returns one topic covering the file; exactly one text
+    embed call lands and the file state is marked indexed."""
     content = ("paragraph with several reasonable-length words in it. " * 2 + "\n\n") * 30
     text_file = tmp_path / "batched.md"
     _ = text_file.write_text(content, encoding="utf-8")
 
     embedder = CountingEmbedder()
     manager = _build_manager_with_embedder(tmp_path, embedder, text_batch_size=8)
-    # Force the chunker to produce many small chunks
-    manager.settings = manager.settings.model_copy(update={"chunk_size": 200, "chunk_overlap": 0, "text_batch_size": 8})
 
     stats, skipped, _ = manager.ingest_paths([str(text_file)])
 
     assert stats.files_added == 1
     assert skipped == []
-    assert embedder.text_batches, "batched path was never called"
-    assert all(b <= 8 for b in embedder.text_batches)
-    assert sum(embedder.text_batches) >= 10, f"expected many chunks, got {embedder.text_batches}"
-    # More than one batch call means the full-size-then-tail split happened.
-    assert len(embedder.text_batches) >= 2
-
-
-def test_ingest_falls_back_to_singles_on_batch_failure(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """If a text batch raises, the file still indexes via per-item singles."""
-    text_file = tmp_path / "fallback.txt"
-    _ = text_file.write_text(_long_text(), encoding="utf-8")
-
-    embedder = CountingEmbedder()
-    embedder.raise_next_batch = True
-    manager = _build_manager_with_embedder(tmp_path, embedder)
-
-    with caplog.at_level(logging.WARNING, logger="ragrag.index.ingest_manager"):
-        stats, skipped, _ = manager.ingest_paths([str(text_file)])
-
-    assert stats.files_added == 1
-    assert skipped == []
-    assert embedder.single_calls > 0, "fallback to singles never happened"
-    assert any(
-        "retrying singles" in r.getMessage() for r in caplog.records
-    )
-
-
-def test_extract_segments_text(tmp_path: Path) -> None:
-    text_file = tmp_path / "chunks.txt"
-    _ = text_file.write_text(_long_text(), encoding="utf-8")
-
-    manager = _build_manager(tmp_path)
-    extract_segments = cast(Any, getattr(manager, "_extract_segments"))
-    segments, images = extract_segments(str(text_file), FileType.TEXT)
-
-    assert len(segments) > 0
-    assert images == []
-    assert all(segment.modality == Modality.TEXT for segment in segments)
-
-
-def test_extract_segments_image(tmp_path: Path) -> None:
-    image_file = tmp_path / "diagram.png"
-    image = Image.new("RGB", (100, 50), "white")
-    image.save(str(image_file))
-
-    manager = _build_manager(tmp_path)
-    extract_segments = cast(Any, getattr(manager, "_extract_segments"))
-    segments, images = extract_segments(str(image_file), FileType.IMAGE)
-
-    assert len(segments) == 1
-    assert len(images) == 1
-    assert segments[0].modality == Modality.IMAGE
+    # One text chunk per file → exactly one call to embed_text_chunks with one item.
+    assert embedder.text_batches == [1]

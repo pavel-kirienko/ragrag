@@ -51,6 +51,7 @@ def _patched_main_dependencies(
     settings = Settings(index_path=str(tmp_path / ".ragrag"), top_k=13)
     with (
         patch("ragrag.embedding.colqwen_embedder.ColQwenEmbedder") as mock_embedder_cls,
+        patch("ragrag.embedding.vlm_loader.load_vlm", side_effect=RuntimeError("skip in tests")),
         patch("ragrag.index.qdrant_store.QdrantStore") as mock_store_cls,
         patch("ragrag.index.ingest_manager.IngestManager") as mock_ingest_cls,
         patch("ragrag.retrieval.search_engine.SearchEngine") as mock_engine_cls,

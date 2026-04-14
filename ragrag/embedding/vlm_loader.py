@@ -188,11 +188,15 @@ def load_vlm(
         except ImportError:
             quant = "none"
 
-    # Use the auto VLM class so we don't hard-code Qwen2.5-VL.
+    # Prefer the modern class name; fall back to the older one for
+    # transformers < 4.56, and finally to plain AutoModel for safety.
     try:
-        from transformers import AutoModelForVision2Seq as _AutoModel
+        from transformers import AutoModelForImageTextToText as _AutoModel
     except ImportError:
-        from transformers import AutoModel as _AutoModel  # type: ignore[no-redef]
+        try:
+            from transformers import AutoModelForVision2Seq as _AutoModel  # type: ignore[no-redef]
+        except ImportError:
+            from transformers import AutoModel as _AutoModel  # type: ignore[no-redef]
 
     kwargs: dict[str, Any] = {
         "trust_remote_code": True,

@@ -122,6 +122,8 @@ class EngineCache:
         # Imported lazily so that ``ragrag daemon --idle`` (no model needed)
         # boots in under a second for tests.
         from ragrag.embedding.colqwen_embedder import ColQwenEmbedder
+        from ragrag.embedding.vlm_loader import load_vlm
+        from ragrag.extractors.vlm_topic_client import VLMTopicClient
         from ragrag.index.ingest_manager import IngestManager
         from ragrag.index.qdrant_store import COLLECTION_NAME, QdrantStore
         from ragrag.retrieval.search_engine import SearchEngine
@@ -134,10 +136,31 @@ class EngineCache:
             settings.max_visual_tokens,
             quantization=settings.quantization,
         )
+        logger.info("ColQwen3 embedder ready in %.1fs", time.time() - t0)
+
+        # VLM topic client is optional: if loading fails we still serve
+        # search queries (reading an existing index), we just can't index
+        # new files. The daemon logs a warning and proceeds.
+        vlm_client: VLMTopicClient | None = None
+        try:
+            t_vlm = time.time()
+            vlm_handle = load_vlm(
+                settings.vlm_model_id,
+                quantization=settings.vlm_quantization,
+            )
+            vlm_client = VLMTopicClient(vlm_handle)
+            logger.info("VLM topic client ready in %.1fs", time.time() - t_vlm)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "VLM topic client unavailable (%s) — indexing new files is disabled until the "
+                "VLM loads; searches over existing indexes still work.",
+                exc,
+            )
+
         store = QdrantStore(settings.index_path, COLLECTION_NAME, embedder.embedding_dim)
-        ingest = IngestManager(embedder, store, settings)
+        ingest = IngestManager(embedder, store, settings, vlm_client=vlm_client)
         engine = SearchEngine(embedder, store, ingest, settings)
-        logger.info("Engine ready for %s in %.1fs", index_path, time.time() - t0)
+        logger.info("Engine ready for %s in %.1fs total", index_path, time.time() - t0)
         return engine
 
     def unload_all(self) -> None:
