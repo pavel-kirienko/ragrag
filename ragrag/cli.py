@@ -475,11 +475,17 @@ def main() -> int:
     """Entry point for the ragrag CLI. Returns exit code."""
     # Sub-command dispatch (peeks at argv[1] before letting argparse parse the search form).
     argv = sys.argv[1:]
-    if argv and argv[0] in {"daemon", "status", "shutdown"}:
+    if argv and argv[0] in {"daemon", "status", "shutdown", "mcp"}:
         sub, rest = argv[0], argv[1:]
         # Minimal logging for sub-commands (the daemon configures its own logger).
         if sub == "daemon":
             return _run_daemon_subcommand(rest)
+        if sub == "mcp":
+            # MCP server speaks over stdio — keep stderr quiet.
+            _setup_logging("WARNING")
+            from ragrag.mcp_server import main as mcp_main
+
+            return mcp_main(rest)
         _setup_logging("WARNING")
         if sub == "status":
             return _run_status_subcommand()
