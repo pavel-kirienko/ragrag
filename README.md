@@ -43,6 +43,52 @@ ragrag "GPIO initialization" --top-k 20 --markdown
 
 For more options see `ragrag --help`.
 
+### Daemon, dashboard, and MCP
+
+Ragrag ships with a local daemon that keeps models loaded between
+queries and cuts the typical warm-query latency to under two
+seconds. The first CLI invocation auto-spawns it; subsequent calls
+reuse it over a Unix socket at `<index>/.ragrag/daemon.sock`.
+
+- `ragrag status` — print a JSON snapshot of the running daemon.
+- `ragrag shutdown` — tell the daemon to exit.
+- `ragrag daemon --idle` — start a daemon explicitly in the background.
+- A minimal HTML dashboard is served on `http://127.0.0.1:27272/`
+  (port configurable) showing models loaded, VRAM/RAM use, current
+  indexing progress, and the last 20 queries. `/pages/<sha>/<n>.webp`
+  serves cached page images directly.
+
+Ragrag can also expose itself as an MCP tool over stdio for agent
+clients:
+
+```bash
+pip install -e '.[mcp]'
+ragrag mcp --index-path /path/to/docs
+```
+
+The single `search_documentation` tool accepts a natural-language
+query and returns topic chunks with titles, summaries, page refs,
+a directory-level location block, and (optionally) base64-encoded
+hero page images.
+
+### Topic chunking and reranking
+
+Each indexable unit is a **topic** identified by a local VLM
+(Qwen2.5-VL-3B by default), not a fixed-size text chunk or a
+physical page. A topic may span multiple pages, possibly
+non-contiguous, and two topics may overlap on the same page when
+the content genuinely belongs to both. The chunker runs in an
+isolated subprocess so its bnb 4-bit CUDA context state never
+contaminates the embedder's allocator.
+
+An optional listwise VLM reranker can be armed by setting
+`"reranker_model": "vlm"` in `ragrag.json`. It spawns a second
+persistent subprocess that takes the top-K candidates from the
+MaxSim retrieval and reorders them by directly inspecting the
+hero page image plus the topic title and summary. Opt-in because
+it takes another ~2.5 GiB of VRAM on top of ColQwen3 —
+tight-8-GB hosts should leave it off.
+
 ### Configuration files
 
 It is possible to set the defaults per directory via the config file. Ragrag will look for `ragrag.json` or `.ragrag.json` in the current working directory in that order; if not found, it will climb directory tree until one is found. All fields are optional.
@@ -51,7 +97,7 @@ It is possible to set the defaults per directory via the config file. Ragrag wil
 {
   "index_path": ".ragrag",
   "model_id": "TomoroAI/tomoro-colqwen3-embed-4b",
-  "max_visual_tokens": 16384,
+  "max_visual_tokens": 4096,
   "top_k": 10,
   "max_top_k": 50,
   "pdf_dpi": 250,
