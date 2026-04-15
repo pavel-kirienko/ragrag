@@ -245,10 +245,19 @@ def summarize(rows: list[dict], index_wall_s: float) -> dict:
     }
 
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_PDF = _REPO_ROOT / "validation" / "fixtures" / "pdfs" / "stm32h743vi.pdf"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Run STM32H743VI quality benchmark.")
     ap.add_argument("--index-dir", default="/tmp/stm32h743_bench", help="Directory holding the PDF and .ragrag index.")
-    ap.add_argument("--pdf", default="/home/pavel/Downloads/stm32h743vi.pdf", help="Source PDF path.")
+    ap.add_argument(
+        "--pdf",
+        default=str(_DEFAULT_PDF),
+        help="Source PDF path. Defaults to the validation fixture; run "
+             "scripts/fetch_validation_data.py to populate it.",
+    )
     ap.add_argument("--report", default="bench_report.json", help="Report JSON output path.")
     ap.add_argument("--cli", default="ragrag", help="Path to ragrag CLI (default: from PATH).")
     ap.add_argument("--top-k", type=int, default=10)
@@ -262,10 +271,19 @@ def main() -> int:
 
     index_dir = Path(args.index_dir)
     index_dir.mkdir(parents=True, exist_ok=True)
-    pdf_dest = index_dir / Path(args.pdf).name
+    pdf_src = Path(args.pdf)
+    if not pdf_src.exists():
+        print(
+            f"Source PDF not found: {pdf_src}\n"
+            "  Run: python scripts/fetch_validation_data.py\n"
+            "  or pass --pdf /path/to/stm32h743vi.pdf",
+            file=sys.stderr, flush=True,
+        )
+        return 2
+    pdf_dest = index_dir / pdf_src.name
     if not pdf_dest.exists():
-        print(f"Copying {args.pdf} -> {pdf_dest}", flush=True)
-        shutil.copyfile(args.pdf, pdf_dest)
+        print(f"Copying {pdf_src} -> {pdf_dest}", flush=True)
+        shutil.copyfile(pdf_src, pdf_dest)
 
     if args.reset:
         ragrag_dir = index_dir / ".ragrag"

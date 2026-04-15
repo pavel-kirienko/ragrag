@@ -7,7 +7,7 @@
     "mrr": 0.8333,
     "semantic_at_5": 0.3333,
     "avg_distinct_pages_top10": 175.0,
-    "avg_query_wall_s": 25.2547,
+    "avg_query_wall_s": 25.5409,
     "by_difficulty": {
       "E": {
         "n": 3,
@@ -31,7 +31,7 @@
         "semantic_at_5": 1.0
       }
     },
-    "index_wall_s": 37.8
+    "index_wall_s": 0.0
   },
   "rows": [
     {
@@ -110,10 +110,10 @@
       ],
       "top1_title": "Typical values",
       "top1_excerpt_head": "Typical values\nProvides typical values based on specific conditions for each parameter.",
-      "wall_s": 24.519,
-      "indexing_ms": 12445,
-      "query_embedding_ms": 913,
-      "retrieval_ms": 55
+      "wall_s": 24.336,
+      "indexing_ms": 12409,
+      "query_embedding_ms": 926,
+      "retrieval_ms": 58
     },
     {
       "id": "Q02_min_vdd",
@@ -136,10 +136,10 @@
       ],
       "top1_title": "Dynamics characteristics: SD/MMC",
       "top1_excerpt_head": "Dynamics characteristics: SD/MMC\nLists the dynamics characteristics related to SD/MMC interfaces.",
-      "wall_s": 27.41,
-      "indexing_ms": 14736,
-      "query_embedding_ms": 1338,
-      "retrieval_ms": 63
+      "wall_s": 23.672,
+      "indexing_ms": 11922,
+      "query_embedding_ms": 997,
+      "retrieval_ms": 57
     },
     {
       "id": "Q03_max_cpu_clock_vs_voltage",
@@ -219,10 +219,10 @@
       ],
       "top1_title": "Minimum and maximum values",
       "top1_excerpt_head": "Minimum and maximum values\nLists the guaranteed minimum and maximum values for each parameter.",
-      "wall_s": 26.618,
-      "indexing_ms": 13724,
-      "query_embedding_ms": 1113,
-      "retrieval_ms": 81
+      "wall_s": 23.898,
+      "indexing_ms": 12065,
+      "query_embedding_ms": 997,
+      "retrieval_ms": 61
     },
     {
       "id": "Q04_flash_wait_states",
@@ -369,10 +369,10 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 26.772,
-      "indexing_ms": 14336,
-      "query_embedding_ms": 1183,
-      "retrieval_ms": 73
+      "wall_s": 24.279,
+      "indexing_ms": 12247,
+      "query_embedding_ms": 1008,
+      "retrieval_ms": 99
     },
     {
       "id": "Q05_adc_resolution_sample_rate",
@@ -519,10 +519,10 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 26.835,
-      "indexing_ms": 14424,
-      "query_embedding_ms": 1138,
-      "retrieval_ms": 58
+      "wall_s": 27.337,
+      "indexing_ms": 14429,
+      "query_embedding_ms": 1185,
+      "retrieval_ms": 82
     },
     {
       "id": "Q06_adc_inl",
@@ -669,10 +669,10 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 25.134,
-      "indexing_ms": 12725,
-      "query_embedding_ms": 917,
-      "retrieval_ms": 59
+      "wall_s": 26.441,
+      "indexing_ms": 13358,
+      "query_embedding_ms": 1021,
+      "retrieval_ms": 69
     },
     {
       "id": "Q07_idd_run_400mhz",
@@ -819,10 +819,10 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 23.67,
-      "indexing_ms": 11937,
-      "query_embedding_ms": 920,
-      "retrieval_ms": 64
+      "wall_s": 25.737,
+      "indexing_ms": 13060,
+      "query_embedding_ms": 1065,
+      "retrieval_ms": 73
     },
     {
       "id": "Q08_idd_stop_mode",
@@ -969,9 +969,9 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 24.36,
-      "indexing_ms": 12270,
-      "query_embedding_ms": 1156,
+      "wall_s": 25.531,
+      "indexing_ms": 12789,
+      "query_embedding_ms": 1085,
       "retrieval_ms": 66
     },
     {
@@ -1119,10 +1119,10 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 26.36,
-      "indexing_ms": 13953,
-      "query_embedding_ms": 1137,
-      "retrieval_ms": 71
+      "wall_s": 27.587,
+      "indexing_ms": 13865,
+      "query_embedding_ms": 1441,
+      "retrieval_ms": 67
     },
     {
       "id": "Q10_vrefbuf_accuracy",
@@ -1269,10 +1269,10 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 23.95,
-      "indexing_ms": 12079,
-      "query_embedding_ms": 883,
-      "retrieval_ms": 55
+      "wall_s": 27.105,
+      "indexing_ms": 13874,
+      "query_embedding_ms": 1114,
+      "retrieval_ms": 69
     },
     {
       "id": "Q11_temp_sensor_calibration",
@@ -1419,10 +1419,10 @@
       ],
       "top1_title": "Current consumption measurement",
       "top1_excerpt_head": "Current consumption measurement\nDescribes the method for measuring current consumption using a specific measurement scheme.",
-      "wall_s": 23.638,
-      "indexing_ms": 11890,
-      "query_embedding_ms": 887,
-      "retrieval_ms": 61
+      "wall_s": 25.194,
+      "indexing_ms": 12753,
+      "query_embedding_ms": 1006,
+      "retrieval_ms": 67
     },
     {
       "id": "Q12_dac_settling_time",
@@ -1472,11 +1472,11 @@
       ],
       "top1_title": "ADC Electrical Characteristics",
       "top1_excerpt_head": "ADC Electrical Characteristics\nDescribes the ADC's performance parameters such as conversion time, trigger modes, and sampling rates.",
-      "wall_s": 23.79,
-      "indexing_ms": 12185,
-      "query_embedding_ms": 889,
-      "retrieval_ms": 50
+      "wall_s": 25.374,
+      "indexing_ms": 12750,
+      "query_embedding_ms": 1096,
+      "retrieval_ms": 58
     }
   ],
-  "cold_indexing_ms": 23582
+  "cold_indexing_ms": 0
 }

@@ -41,6 +41,12 @@ PDF_DOWNLOADS = [
         "description": "RP2040 datasheet with PIO state machine diagrams, DMA ring buffers",
         "min_size_bytes": 1_000_000,
     },
+    {
+        "url": "https://www.st.com/resource/en/datasheet/stm32h743vi.pdf",
+        "filename": "stm32h743vi.pdf",
+        "description": "STM32H743VI datasheet — used by scripts/benchmark_stm32h743.py as the quality-regression corpus",
+        "min_size_bytes": 5_000_000,
+    },
 ]
 
 
