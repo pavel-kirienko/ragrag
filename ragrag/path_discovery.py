@@ -14,6 +14,14 @@ if TYPE_CHECKING:
     from ragrag.config import Settings
 
 
+# ragrag's own config files should never end up in the search index even
+# when they live next to the corpus. Indexing them clutters the store
+# with tiny JSON rows that will occasionally rank near the top and
+# confuse the benchmark. Hidden-file filtering already drops
+# ``.ragrag.json`` but ``ragrag.json`` sneaks through.
+_RAGRAG_CONFIG_BASENAMES: frozenset[str] = frozenset({"ragrag.json", ".ragrag.json"})
+
+
 def discover_files(
     paths: list[str], settings: Settings
 ) -> tuple[list[str], list[SkippedFile]]:
@@ -36,7 +44,11 @@ def discover_files(
 
         if os.path.isfile(abs_path):
             # Single file: check file type
-            if not _is_supported_file(real_path):
+            if os.path.basename(real_path) in _RAGRAG_CONFIG_BASENAMES:
+                skipped.append(
+                    SkippedFile(path=real_path, reason="ragrag config file")
+                )
+            elif not _is_supported_file(real_path):
                 skipped.append(
                     SkippedFile(path=real_path, reason="unsupported file type")
                 )
@@ -73,6 +85,12 @@ def _walk_directory(
             # Process files
             for filename in files:
                 if not settings.include_hidden and filename.startswith("."):
+                    continue
+
+                if filename in _RAGRAG_CONFIG_BASENAMES:
+                    # Silently drop ragrag's own config rather than
+                    # adding it to skipped[] — the user did not ask to
+                    # index their own knobs file.
                     continue
 
                 file_path = os.path.join(root, filename)

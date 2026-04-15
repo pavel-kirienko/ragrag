@@ -139,6 +139,31 @@ def test_path_discovery(tmp_path: Path) -> None:
     assert ".hidden.txt" not in discovered_names
 
 
+def test_path_discovery_skips_ragrag_config(tmp_path: Path) -> None:
+    """ragrag.json next to the corpus must NOT be indexed as content.
+
+    Regression: the Phase D smoke test dropped ragrag.json into the
+    index dir to enable the reranker; without this filter the config
+    became two extra points in the store and showed up near the top
+    of unrelated queries.
+    """
+    root = tmp_path / "fixtures"
+    root.mkdir()
+    _ = (root / "code.c").write_text("int main(void){return 0;}\n", encoding="utf-8")
+    _ = (root / "ragrag.json").write_text("{}", encoding="utf-8")
+    _ = (root / ".ragrag.json").write_text("{}", encoding="utf-8")
+
+    settings = get_settings().model_copy(
+        update={"include_hidden": True, "follow_symlinks": False}
+    )
+
+    discovered, skipped = discover_files([str(root)], settings)
+    discovered_names = {Path(p).name for p in discovered}
+    assert "code.c" in discovered_names
+    assert "ragrag.json" not in discovered_names
+    assert ".ragrag.json" not in discovered_names
+
+
 def test_config_climbing(tmp_path: Path) -> None:
     from ragrag.config import find_index_root
 
