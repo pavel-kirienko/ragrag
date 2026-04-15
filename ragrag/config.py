@@ -106,6 +106,14 @@ class Settings(BaseModel):
         default=20, ge=1,
         description="Close a topic after this many pages without any reference.",
     )
+    chunker_topic_max_pages: int = Field(
+        default=15, ge=1, le=200,
+        description="Hard cap on how many pages a single topic may "
+                    "reference before the chunker forcibly closes it. "
+                    "Prevents a mega-topic like 'Typical values' "
+                    "spanning an entire chapter. The VLM is still "
+                    "prompted to stay focused; this is the safety net.",
+    )
 
     # Phase D — VLM reranker
     reranker_model: str = Field(
@@ -209,6 +217,16 @@ def find_index_root(start_dir: str | None = None) -> tuple[str, Settings]:
     while True:
         index_path = os.path.join(current_dir, ".ragrag")
         if os.path.isdir(index_path):
+            # Prefer a sibling ragrag.json's settings when present so a
+            # user can keep the index inside a pre-built .ragrag while
+            # still tweaking knobs via the JSON config. The index_path
+            # from the JSON is overridden with the discovered
+            # ``.ragrag/`` so the two never disagree.
+            cfg = _load_settings_in_dir(current_dir)
+            if cfg is not None:
+                return current_dir, cfg.model_copy(
+                    update={"index_path": os.path.abspath(index_path)}
+                )
             return current_dir, Settings(index_path=os.path.abspath(index_path))
 
         settings = _load_settings_in_dir(current_dir)

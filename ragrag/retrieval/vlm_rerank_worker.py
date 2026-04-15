@@ -130,7 +130,16 @@ def _handle_rerank(handle, request: dict, args) -> dict:
         return {"status": "error", "error": "no candidates"}
 
     prompt = _build_prompt(query, candidates)
-    images = _load_images(candidates, args.image_max_side)
+    # On CPU the vision encoder is the dominant cost (a 10-image
+    # rerank prompt is ~10k image tokens of prefill, several minutes
+    # per query). The candidate text — title, summary, excerpt — is
+    # already informative enough for listwise ranking in text-only
+    # mode, so we drop images entirely when the handle is on CPU.
+    handle_device = str(getattr(handle, "device", "") or "").lower()
+    if handle_device == "cpu":
+        images: list[Any] = []
+    else:
+        images = _load_images(candidates, args.image_max_side)
 
     raw = handle.generate(
         prompt,

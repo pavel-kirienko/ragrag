@@ -94,6 +94,7 @@ class VLMTopicChunker:
         stride = max(1, int(self.settings.chunker_stride_pages))
         cold_threshold = max(1, int(self.settings.chunker_topic_cold_pages))
         max_topics_per_call = max(1, int(self.settings.chunker_max_topics_per_call))
+        max_topic_pages = max(1, int(getattr(self.settings, "chunker_topic_max_pages", 15)))
 
         open_topics: dict[str, _OpenTopic] = {}
         closed_topics: list[_OpenTopic] = []
@@ -137,6 +138,10 @@ class VLMTopicChunker:
                 )
             else:
                 _apply_assignments(open_topics, assignments)
+            # Force-close any topic that grew beyond the per-topic
+            # page cap. Prevents a single mega-topic from swallowing
+            # the whole document when the VLM keeps extending it.
+            _force_close_oversized_topics(open_topics, closed_topics, max_topic_pages)
             # Close cold topics
             _close_cold_topics(open_topics, closed_topics, latest_page_seen, cold_threshold)
 
@@ -218,6 +223,27 @@ def _close_cold_topics(
         if latest_page_seen - topic.last_seen_page >= cold_threshold
     ]
     for tid in to_close:
+        closed_topics.append(open_topics.pop(tid))
+
+
+def _force_close_oversized_topics(
+    open_topics: dict[str, _OpenTopic],
+    closed_topics: list[_OpenTopic],
+    max_pages: int,
+) -> None:
+    """Evict any open topic that has already collected more than ``max_pages``
+    pages. Protects retrieval quality against mega-topics the VLM might emit
+    when a long section feels "thematically similar" at the document level.
+    """
+    to_close = [
+        tid for tid, topic in open_topics.items()
+        if len(set(topic.pages)) >= max_pages
+    ]
+    for tid in to_close:
+        logger.debug(
+            "chunker: force-closing oversized topic %r (%d pages)",
+            open_topics[tid].title, len(set(open_topics[tid].pages)),
+        )
         closed_topics.append(open_topics.pop(tid))
 
 

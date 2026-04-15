@@ -183,23 +183,42 @@ class VLMTopicClient:
             or "none yet"
         )
         return (
-            f'You are segmenting a technical document into topic chunks. Below is '
-            f"page {page}. Decide which topic(s) this page belongs to.\n\n"
-            f"Rules:\n"
-            f"- A topic is a coherent subject (e.g. 'ADC electrical characteristics', "
-            f"'Pinout description', 'Package dimensions').\n"
-            f"- A page may belong to multiple topics.\n"
-            f"- Reuse the id of an existing topic from the list below if the page is "
-            f"a continuation. Continuations omit t and s.\n"
-            f"- Invent a new id (like 't12', 't13') for a brand-new topic, and give "
-            f"it a real descriptive title and one-sentence summary.\n"
+            f"You are segmenting a technical document into FOCUSED topic chunks "
+            f"for a retrieval index. Below is page {page}.\n\n"
+            f"Rules for a good topic:\n"
+            f"- A topic is a SPECIFIC subject tied to concrete nouns the reader "
+            f"would search for: e.g. 'ADC sampling and conversion time', "
+            f"'VREFBUF internal reference voltage', 'Flash memory wait states'. "
+            f"DO NOT use generic umbrella titles like 'Typical values', "
+            f"'Electrical characteristics', 'Temperature characteristics', "
+            f"'Minimum and maximum values' — those cover too much for retrieval "
+            f"to be useful.\n"
+            f"- Prefer small, specific topics. If the page starts a different "
+            f"subject from the previous running topics, CREATE A NEW TOPIC with "
+            f"a fresh id rather than extending an existing one. It is much "
+            f"better to have two precise topics than one fuzzy one.\n"
+            f"- A topic rarely spans more than ~10 pages. If you are about to "
+            f"continue an existing topic that has already seen >10 pages, check "
+            f"whether the subject actually changed on this page and create a "
+            f"new topic if so.\n"
+            f"- A page may belong to multiple topics when it genuinely covers "
+            f"two subjects (e.g. a table with both ADC and DAC specs).\n"
+            f"- Reuse the id of an existing topic ONLY for a direct continuation. "
+            f"Continuations set c:true and omit t and s.\n"
+            f"- New topics need a real descriptive title (under 80 chars) and a "
+            f"one-sentence summary (under 160 chars) mentioning the actual "
+            f"quantities or concepts on this page.\n"
             f"- Up to {max_topics_per_call} new topics per page.\n\n"
-            f"Open topics from earlier: {running}\n\n"
-            f'Output format (JSON, one line, NO prose, NO markdown fences):\n'
+            f"Open topics from earlier in the document: {running}\n\n"
+            f"Output format (one-line JSON, NO prose, NO markdown fences):\n"
             f'{{"topics":[{{"id":"<id>","c":<bool>,"t":"<real title>","s":"<real summary>"}}]}}\n\n'
-            f"Worked example for the first page of an STM32 datasheet:\n"
-            f'{{"topics":[{{"id":"t1","c":false,"t":"STM32H743 feature overview","s":'
-            f'"Introduces the chip family, Cortex-M7 core, peripherals, and package options."}}]}}\n\n'
+            f"Good example:\n"
+            f'{{"topics":[{{"id":"t17","c":false,"t":"ADC sampling and conversion time",'
+            f'"s":"ADC clock sources, sampling cycles per channel, and conversion time '
+            f'formula at 12 / 14 / 16-bit resolution."}}]}}\n\n'
+            f"Bad example (REJECT — too generic):\n"
+            f'{{"topics":[{{"id":"t17","c":false,"t":"Typical values",'
+            f'"s":"Typical values under standard operating conditions."}}]}}\n\n'
             f"Now describe THIS page:\n"
             f"---\n"
             f"{_truncate(text, 1200)}\n"
