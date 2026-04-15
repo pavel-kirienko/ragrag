@@ -158,6 +158,45 @@ class SearchEngine:
         errors: list[str] = []
 
         # ------------------------------------------------------------------
+        # Phase 0: Pre-spawn the reranker subprocess.
+        # ------------------------------------------------------------------
+        # On 8 GiB cards the rerank worker's VLM only has a clean
+        # shot at its ~2.5 GiB slice while the parent process has no
+        # torch state yet. Once ColQwen3 initialises its bnb 4-bit
+        # CUDA context (~3.5 GiB non-releasable until process exit),
+        # the worker can only see ~40 MiB free and OOMs on the first
+        # forward. The ingest phase loads the embedder too, so this
+        # prewarm has to run BEFORE ingest_paths, not between it and
+        # query embedding. Prewarm is a no-op when reranker_model is
+        # "none".
+        rerank_armed = False
+        if self.reranker is not None:
+            prewarm = getattr(self.reranker, "prewarm", None)
+            if prewarm is not None:
+                try:
+                    prewarm()
+                    rerank_armed = True
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Reranker prewarm failed: %s", exc)
+
+        # With the reranker resident on GPU, there isn't enough
+        # VRAM left on the reference 8 GiB card for ColQwen3 at
+        # bnb 4-bit (weights + cuBLAS workspace + activations).
+        # Force the embedder to CPU so the ingest manager doesn't
+        # bounce off an OOM trying to claim GPU, which tends to
+        # leave fragments behind that then break the reranker
+        # worker's first forward pass. The embedder on CPU is
+        # slower per-query but correct, and text-only query
+        # embedding is cheap enough that the end-to-end latency
+        # is dominated by the VLM rerank anyway.
+        if rerank_armed and "RAGRAG_EMBEDDER_DEVICE" not in os.environ:
+            os.environ["RAGRAG_EMBEDDER_DEVICE"] = "cpu"
+            logger.info(
+                "Reranker armed: pinning embedder to CPU (set "
+                "RAGRAG_EMBEDDER_DEVICE explicitly to override)"
+            )
+
+        # ------------------------------------------------------------------
         # Phase 1: Indexing
         # ------------------------------------------------------------------
         t0 = time.time()
@@ -255,6 +294,8 @@ class SearchEngine:
         # ------------------------------------------------------------------
         # Phase 5: Optional VLM rerank
         # ------------------------------------------------------------------
+        # The worker was already spawned in Phase 2 (prewarm). Here
+        # we just send the rerank request over the existing pipe.
         rerank_ms = 0.0
         if self.reranker is not None and results:
             t_rerank = time.time()

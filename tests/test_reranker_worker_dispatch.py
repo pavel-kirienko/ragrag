@@ -1,4 +1,4 @@
-"""Verify the parent-side rerank spawner passes the moondream model id.
+"""Verify the parent-side rerank spawner passes the configured model id.
 
 The reranker module builds the subprocess argv from settings and then
 hands it to ``subprocess.Popen``. We monkeypatch Popen with a recorder
@@ -60,7 +60,7 @@ class _RecordingWorker:
         return None
 
 
-def test_reranker_spawn_uses_moondream_model_id(monkeypatch) -> None:
+def test_reranker_spawn_uses_configured_model_id(monkeypatch) -> None:
     captured: dict[str, list[str]] = {}
 
     def _fake_popen(argv, **_kwargs):  # type: ignore[no-untyped-def]
@@ -69,12 +69,15 @@ def test_reranker_spawn_uses_moondream_model_id(monkeypatch) -> None:
 
     monkeypatch.setattr("ragrag.retrieval.reranker.subprocess.Popen", _fake_popen)
 
+    # Use a model id distinct from the default so we verify the
+    # setting actually flows through and we're not just getting the
+    # default baked into a hardcoded path.
     settings = Settings(
-        index_path="/tmp/ragrag-moondream-test",
+        index_path="/tmp/ragrag-rerank-dispatch-test",
         reranker_model="vlm",
-        reranker_model_id="vikhyatk/moondream2",
+        reranker_model_id="some-org/some-other-vlm",
         reranker_require_gpu=True,
-        moondream_activation_headroom_mib=384,
+        reranker_activation_headroom_mib=384,
     )
     rr = VLMReranker(settings)
     try:
@@ -85,15 +88,11 @@ def test_reranker_spawn_uses_moondream_model_id(monkeypatch) -> None:
     argv = captured["argv"]
     assert "--model-id" in argv
     model_idx = argv.index("--model-id")
-    assert argv[model_idx + 1] == "vikhyatk/moondream2"
+    assert argv[model_idx + 1] == "some-org/some-other-vlm"
     assert "--require-gpu" in argv
     assert "--activation-headroom-mib" in argv
     hdx = argv.index("--activation-headroom-mib")
     assert argv[hdx + 1] == "384"
-    # And the chunker model id must NOT have been used — the two
-    # knobs have to stay independent so the chunker can keep using
-    # Qwen2.5-VL-3B while the reranker uses Moondream2.
-    assert argv[model_idx + 1] != settings.vlm_model_id
 
 
 def test_reranker_spawn_honors_require_gpu_off(monkeypatch) -> None:

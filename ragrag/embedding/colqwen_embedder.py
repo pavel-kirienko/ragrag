@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 def _detect_device() -> str:
+    # Operator override: the search engine sets this when the Phase D
+    # reranker has already claimed GPU VRAM and we don't want the
+    # embedder to bounce off an OOM trying to load into whatever
+    # sliver is left. See search_engine._maybe_force_cpu_embedder.
+    import os as _os
+
+    forced = (_os.environ.get("RAGRAG_EMBEDDER_DEVICE") or "").lower().strip()
+    if forced in {"cpu", "cuda", "mps"}:
+        return forced
     if torch.cuda.is_available():
         return "cuda"
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():

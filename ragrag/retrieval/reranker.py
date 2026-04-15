@@ -59,7 +59,7 @@ class VLMReranker:
         self._max_candidates = int(getattr(settings, "rerank_max_candidates", 10))
         self._require_gpu = bool(getattr(settings, "reranker_require_gpu", True))
         self._activation_headroom_mib = int(
-            getattr(settings, "moondream_activation_headroom_mib", 512)
+            getattr(settings, "reranker_activation_headroom_mib", 512)
         )
 
     # ------------------------------------------------------------------ #
@@ -111,6 +111,21 @@ class VLMReranker:
             "VLM rerank worker ready (model=%s, device=%s)",
             payload.get("model_id"), payload.get("device"),
         )
+
+    def prewarm(self) -> None:
+        """Spawn the worker early so its VLM gets first pick of VRAM.
+
+        The search engine calls this before loading the embedder on
+        tight GPUs. Reserving VRAM for the rerank worker while the
+        main process hasn't initialised its own CUDA context yet is
+        the only reliable way to make both models coexist under
+        8 GiB — ``ColQwenEmbedder.unload()`` can't release bnb 4-bit
+        state in-process, so waiting until after query embedding to
+        spawn the worker leaves ~4 GiB pinned in the parent and the
+        worker OOMs the moment it tries to load its weights.
+        """
+        with self._lock:
+            self._spawn()
 
     def close(self) -> None:
         with self._lock:

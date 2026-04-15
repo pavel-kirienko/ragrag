@@ -89,6 +89,19 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        import torch
+
+        # Disable cuDNN entirely in the rerank worker. With
+        # attn_implementation="eager" the transformer blocks already
+        # bypass SDPA, but image-preprocessing and embedding-layer
+        # ops still dispatch through cuDNN, and torch 2.4.1 + cuDNN 9
+        # on the NVIDIA 470 / CUDA 11.4 reference driver raises "GET
+        # was unable to find an engine to execute this computation"
+        # mid-forward when cuDNN can't find a bf16 variant. Turning
+        # it off forces PyTorch-native fallbacks, which are slower
+        # but always dispatch.
+        torch.backends.cudnn.enabled = False
+
         from ragrag.embedding.vlm_loader import load_vlm
 
         # When the reranker is pinned to GPU we pass device="cuda"
@@ -216,15 +229,17 @@ def _handle_rerank(handle, request: dict, args) -> dict:
 def _build_prompt(query: str, candidates: list[dict]) -> str:
     """Build a terse listwise rerank prompt.
 
-    Tuned for Moondream2: shorter preamble, imperative voice, and the
-    output schema shown as a literal example so the model has fewer
-    degrees of freedom to hallucinate prose around the JSON.
+    Shorter preamble, imperative voice, and the output schema shown
+    as a literal example so the model has fewer degrees of freedom to
+    hallucinate prose around the JSON.
     """
+    ids = [int(c.get("id", 0)) for c in candidates]
+    id_list = ", ".join(str(i) for i in ids)
     lines: list[str] = []
     lines.append(f'Query: "{query}"')
     lines.append("")
-    lines.append(f"Rank these {len(candidates)} candidates by relevance to the query.")
-    lines.append("Use only the information shown.")
+    lines.append(f"Rank these {len(candidates)} candidate topic chunks by relevance to the query.")
+    lines.append("Use only the information shown. Do not invent pages or facts.")
     lines.append("")
     for c in candidates:
         lines.append(
@@ -238,9 +253,16 @@ def _build_prompt(query: str, candidates: list[dict]) -> str:
             lines.append(f"  excerpt: {excerpt[:240]}")
         lines.append("")
     lines.append(
-        'Output JSON only, no prose: [{"id":N,"rank":1,"score":0-9,"reason":"..."}, ...]'
+        'Output format (JSON array, nothing else, no markdown fences):'
     )
-    lines.append("rank 1 = most relevant. score 9 = directly answers. Every id must appear.")
+    lines.append(
+        '[{"id":<int>,"rank":<int>,"score":<0-9>,"reason":"<short>"}, ...]'
+    )
+    lines.append(
+        f'The "id" MUST be the integer in the [..] brackets above: one of [{id_list}]. '
+        "Do NOT use the title as the id. rank 1 = most relevant. "
+        f"Every id in [{id_list}] must appear exactly once."
+    )
     return "\n".join(lines)
 
 
@@ -271,6 +293,7 @@ def _load_images(candidates: list[dict], max_side: int) -> list[Any]:
 
 
 _RANK_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
+_RANK_OBJECT_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
 
 def _parse_ranks(raw: str, candidates: list[dict]) -> list[dict]:
@@ -284,13 +307,29 @@ def _parse_ranks(raw: str, candidates: list[dict]) -> list[dict]:
         if stripped.endswith("```"):
             stripped = stripped[:-3].rstrip()
 
+    payload: Any = None
     match = _RANK_ARRAY_RE.search(stripped)
-    if not match:
-        return []
-    try:
-        payload = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return []
+    if match:
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            payload = None
+
+    if payload is None:
+        # Salvage a truncated JSON array by extracting every complete
+        # {...} object individually. Qwen tends to cut mid-reason on
+        # ``max_new_tokens`` budgets; the already-emitted objects are
+        # still valid JSON even if the closing bracket is missing.
+        salvaged: list[dict] = []
+        for m in _RANK_OBJECT_RE.finditer(stripped):
+            try:
+                obj = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                salvaged.append(obj)
+        if salvaged:
+            payload = salvaged
     if not isinstance(payload, list):
         return []
 

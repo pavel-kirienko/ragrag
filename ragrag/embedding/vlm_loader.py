@@ -281,14 +281,20 @@ def load_vlm(
             quant = "none"
 
     # Prefer the modern class name; fall back to the older one for
-    # transformers < 4.56, and finally to plain AutoModel for safety.
-    try:
-        from transformers import AutoModelForImageTextToText as _AutoModel
-    except ImportError:
+    # transformers < 4.56, then to AutoModelForCausalLM (moondream2
+    # ships with auto_map = AutoModelForCausalLM), and finally to
+    # plain AutoModel for any remaining custom-code model.
+    factory_chain: list[Any] = []
+    for factory_name in (
+        "AutoModelForImageTextToText",
+        "AutoModelForVision2Seq",
+        "AutoModelForCausalLM",
+        "AutoModel",
+    ):
         try:
-            from transformers import AutoModelForVision2Seq as _AutoModel  # type: ignore[no-redef]
-        except ImportError:
-            from transformers import AutoModel as _AutoModel  # type: ignore[no-redef]
+            factory_chain.append(getattr(__import__("transformers", fromlist=[factory_name]), factory_name))
+        except (ImportError, AttributeError):
+            continue
 
     kwargs: dict[str, Any] = {
         "trust_remote_code": True,
@@ -303,22 +309,64 @@ def load_vlm(
     }
     if quantization_config is not None:
         kwargs["quantization_config"] = quantization_config
-        kwargs["device_map"] = "auto"
+        # Pin every module to cuda:0 instead of ``device_map="auto"``.
+        # Accelerate's auto heuristic underestimates free VRAM on 8 GB
+        # cards (same pattern as the ColQwen3 loader) and starts
+        # spilling layers to the CPU or disk, which then blows up
+        # under bnb because 4-bit modules can't be dispatched off
+        # device. A fixed cuda:0 mapping keeps the whole model on GPU
+        # or fails cleanly.
+        kwargs["device_map"] = {"": "cuda:0"} if chosen_device == "cuda" else None
     elif chosen_device == "cuda":
         kwargs["dtype"] = torch.bfloat16
-        kwargs["device_map"] = "auto"
+        kwargs["device_map"] = {"": "cuda:0"}
     else:
         kwargs["dtype"] = torch.bfloat16  # CPU bf16 is fine on modern x86
 
-    try:
-        model = _AutoModel.from_pretrained(
-            model_id, local_files_only=prefer_local, **kwargs
-        ).eval()
-    except (OSError, FileNotFoundError):
-        logger.warning("VLM weights cache incomplete; retrying with network fetch")
-        model = _AutoModel.from_pretrained(
-            model_id, local_files_only=False, **kwargs
-        ).eval()
+    model = None
+    last_err: Exception | None = None
+    for factory in factory_chain:
+        try:
+            model = factory.from_pretrained(
+                model_id, local_files_only=prefer_local, **kwargs
+            ).eval()
+            break
+        except (OSError, FileNotFoundError) as exc:
+            # Cache miss — retry once with network access before giving
+            # up on this factory.
+            logger.warning("VLM weights cache incomplete; retrying with network fetch")
+            try:
+                model = factory.from_pretrained(
+                    model_id, local_files_only=False, **kwargs
+                ).eval()
+                break
+            except Exception as retry_exc:  # noqa: BLE001
+                last_err = retry_exc
+                continue
+        except ValueError as exc:
+            # The config class isn't registered with this factory
+            # (moondream2's HfConfig, etc.). Try the next factory in
+            # the chain; the final AutoModel fallback always works
+            # because it uses trust_remote_code resolution directly.
+            logger.info(
+                "VLM %s not recognised by %s, trying next factory (%s)",
+                model_id, factory.__name__, exc,
+            )
+            last_err = exc
+            continue
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            logger.warning(
+                "VLM load via %s failed: %s — trying next factory",
+                factory.__name__, exc,
+            )
+            continue
+
+    if model is None:
+        raise RuntimeError(
+            f"Could not load VLM {model_id!r} via any transformers Auto* factory "
+            f"(last error: {last_err})"
+        )
 
     handle = VLMHandle(
         model_id=model_id,

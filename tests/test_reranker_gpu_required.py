@@ -87,6 +87,10 @@ def test_worker_accepts_cuda_handle(monkeypatch) -> None:
             def is_available() -> bool:
                 return False
 
+        class backends:
+            class cudnn:
+                enabled = True
+
     # Swap the whole 'torch' import the worker makes in its probe by
     # replacing the probe block's import target via sys.modules.
     monkeypatch.setitem(sys.modules, "torch", _StubTorch)  # type: ignore[arg-type]

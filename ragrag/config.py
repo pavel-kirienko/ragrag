@@ -123,13 +123,15 @@ class Settings(BaseModel):
                     "using reranker_model_id). Default off on tight GPUs.",
     )
     reranker_model_id: str = Field(
-        default="vikhyatk/moondream2",
-        description="HuggingFace model ID for the reranker VLM. Kept "
-                    "distinct from vlm_model_id so the chunker (which "
-                    "needs Qwen2.5-VL-3B's instruction following) and the "
-                    "reranker (which needs a footprint small enough to "
-                    "coexist with ColQwen3 on an 8 GB GPU) can pick "
-                    "different weights.",
+        default="Qwen/Qwen2.5-VL-3B-Instruct",
+        description="HuggingFace model ID for the reranker VLM. Kept as "
+                    "a distinct setting from vlm_model_id so operators "
+                    "can pair the chunker and reranker with different "
+                    "weights if their host changes. Defaults to the same "
+                    "Qwen2.5-VL-3B-Instruct the chunker uses; the search "
+                    "path unloads ColQwen3 before spawning the worker "
+                    "so the two models don't have to fit on GPU at the "
+                    "same time.",
     )
     reranker_require_gpu: bool = Field(
         default=True,
@@ -139,7 +141,7 @@ class Settings(BaseModel):
                     "unusable. Set false to opt back in on hosts with "
                     "lots of RAM and patience.",
     )
-    moondream_activation_headroom_mib: int = Field(
+    reranker_activation_headroom_mib: int = Field(
         default=512, ge=0,
         description="After the reranker subprocess has loaded its own "
                     "weights, if free VRAM drops below this threshold "
