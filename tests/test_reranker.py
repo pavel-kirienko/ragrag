@@ -199,7 +199,8 @@ def test_build_prompt_contains_all_candidate_ids() -> None:
     assert "ADC sample rate" in prompt
     assert "[0] ADC" in prompt
     assert "[1] DAC" in prompt
-    assert "JSON array" in prompt
+    assert "JSON" in prompt
+    assert '"id"' in prompt and '"rank"' in prompt
 
 
 # --------------------------------------------------------------------------- #

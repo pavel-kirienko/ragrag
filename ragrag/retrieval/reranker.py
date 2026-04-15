@@ -47,12 +47,20 @@ class VLMReranker:
         self._lock = threading.RLock()
         self._proc: Optional[subprocess.Popen[str]] = None
         self._ready: bool = False
-        self._model_id = settings.vlm_model_id
+        # The reranker has its own model id so it can diverge from the
+        # chunker. Chunker stays on Qwen2.5-VL-3B (phase B's prompt
+        # expects it); reranker defaults to Moondream2 which coexists
+        # with ColQwen3 on 8 GB GPUs.
+        self._model_id = getattr(settings, "reranker_model_id", "") or settings.vlm_model_id
         self._quantization = settings.vlm_quantization
         self._image_max_side = int(getattr(settings, "rerank_image_max_side", 640))
         self._max_new_tokens = int(getattr(settings, "rerank_max_new_tokens", 384))
         self._oversample = int(getattr(settings, "rerank_oversample", 3))
         self._max_candidates = int(getattr(settings, "rerank_max_candidates", 10))
+        self._require_gpu = bool(getattr(settings, "reranker_require_gpu", True))
+        self._activation_headroom_mib = int(
+            getattr(settings, "moondream_activation_headroom_mib", 512)
+        )
 
     # ------------------------------------------------------------------ #
     # Worker lifecycle
@@ -69,7 +77,10 @@ class VLMReranker:
             "--quantization", self._quantization,
             "--image-max-side", str(self._image_max_side),
             "--max-new-tokens", str(self._max_new_tokens),
+            "--activation-headroom-mib", str(self._activation_headroom_mib),
         ]
+        if self._require_gpu:
+            cmd.append("--require-gpu")
         logger.info("Spawning VLM rerank worker: %s", " ".join(cmd))
         self._proc = subprocess.Popen(
             cmd,

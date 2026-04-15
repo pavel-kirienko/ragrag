@@ -120,7 +120,32 @@ class Settings(BaseModel):
         default="none",
         description="Reranker model: 'none' (off, MaxSim-only), "
                     "or 'vlm' (spawn a listwise VLM reranker subprocess "
-                    "using vlm_model_id). Default off on tight GPUs.",
+                    "using reranker_model_id). Default off on tight GPUs.",
+    )
+    reranker_model_id: str = Field(
+        default="vikhyatk/moondream2",
+        description="HuggingFace model ID for the reranker VLM. Kept "
+                    "distinct from vlm_model_id so the chunker (which "
+                    "needs Qwen2.5-VL-3B's instruction following) and the "
+                    "reranker (which needs a footprint small enough to "
+                    "coexist with ColQwen3 on an 8 GB GPU) can pick "
+                    "different weights.",
+    )
+    reranker_require_gpu: bool = Field(
+        default=True,
+        description="When true the rerank worker refuses to run on CPU: "
+                    "a 10-image listwise forward pass on a laptop CPU "
+                    "takes minutes per query, which makes the benchmark "
+                    "unusable. Set false to opt back in on hosts with "
+                    "lots of RAM and patience.",
+    )
+    moondream_activation_headroom_mib: int = Field(
+        default=512, ge=0,
+        description="After the reranker subprocess has loaded its own "
+                    "weights, if free VRAM drops below this threshold "
+                    "the worker logs a warning (but keeps running). "
+                    "Gives the operator an early signal that the next "
+                    "rerank call may OOM on a 10-image prompt.",
     )
     rerank_oversample: int = Field(
         default=3, ge=1, le=8,

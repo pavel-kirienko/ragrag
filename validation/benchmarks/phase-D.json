@@ -1,0 +1,417 @@
+{
+  "summary": {
+    "n": 12,
+    "p_at_1": 0.3333,
+    "p_at_5": 0.8333,
+    "p_at_10": 0.8333,
+    "mrr": 0.5694,
+    "semantic_at_5": 0.5,
+    "avg_distinct_pages_top10": 34.5833,
+    "avg_query_wall_s": 13.894,
+    "by_difficulty": {
+      "E": {
+        "n": 3,
+        "p_at_1": 0.3333,
+        "p_at_5": 0.6667,
+        "mrr": 0.5,
+        "semantic_at_5": 0.3333
+      },
+      "M": {
+        "n": 8,
+        "p_at_1": 0.25,
+        "p_at_5": 0.875,
+        "mrr": 0.5417,
+        "semantic_at_5": 0.5
+      },
+      "H": {
+        "n": 1,
+        "p_at_1": 1.0,
+        "p_at_5": 1.0,
+        "mrr": 1.0,
+        "semantic_at_5": 1.0
+      }
+    },
+    "index_wall_s": 0.0
+  },
+  "rows": [
+    {
+      "id": "Q01_max_junction_temp",
+      "query": "maximum junction temperature TJ",
+      "difficulty": "E",
+      "expected_pages": [
+        105,
+        105
+      ],
+      "top1": false,
+      "top5": true,
+      "top10": true,
+      "mrr": 0.5,
+      "semantic5": false,
+      "distinct_pages_top10": 44,
+      "top1_modality": "image",
+      "top1_pages": [
+        198,
+        200,
+        201,
+        202,
+        204,
+        205,
+        206,
+        207,
+        208,
+        210,
+        213,
+        229,
+        230,
+        231,
+        232
+      ],
+      "top1_title": "Electrical characteristics (rev Y)",
+      "top1_excerpt_head": "Electrical characteristics (rev Y)\nDetailed electrical specifications for STM32H742xI/G and STM32H743xI/G microcontrollers.",
+      "wall_s": 50.048,
+      "indexing_ms": 1197,
+      "query_embedding_ms": 2452,
+      "retrieval_ms": 1085
+    },
+    {
+      "id": "Q02_min_vdd",
+      "query": "minimum VDD operating voltage range",
+      "difficulty": "E",
+      "expected_pages": [
+        105,
+        106
+      ],
+      "top1": false,
+      "top5": false,
+      "top10": false,
+      "mrr": 0.0,
+      "semantic5": false,
+      "distinct_pages_top10": 8,
+      "top1_modality": "text",
+      "top1_pages": [
+        209
+      ],
+      "top1_title": "General operating conditions",
+      "top1_excerpt_head": "General operating conditions\nOperating conditions for STM32H742xI/G and STM32H743xI/G microcontrollers.",
+      "wall_s": 9.704,
+      "indexing_ms": 1118,
+      "query_embedding_ms": 2686,
+      "retrieval_ms": 1257
+    },
+    {
+      "id": "Q03_max_cpu_clock_vs_voltage",
+      "query": "maximum CPU clock frequency at VOS0 voltage scaling",
+      "difficulty": "M",
+      "expected_pages": [
+        105,
+        130
+      ],
+      "top1": false,
+      "top5": true,
+      "top10": true,
+      "mrr": 0.5,
+      "semantic5": false,
+      "distinct_pages_top10": 68,
+      "top1_modality": "image",
+      "top1_pages": [
+        198,
+        200,
+        201,
+        202,
+        204,
+        205,
+        206,
+        207,
+        208,
+        210,
+        213,
+        229,
+        230,
+        231,
+        232
+      ],
+      "top1_title": "Electrical characteristics (rev Y)",
+      "top1_excerpt_head": "Electrical characteristics (rev Y)\nDetailed electrical specifications for STM32H742xI/G and STM32H743xI/G microcontrollers.",
+      "wall_s": 10.34,
+      "indexing_ms": 1117,
+      "query_embedding_ms": 3116,
+      "retrieval_ms": 1568
+    },
+    {
+      "id": "Q04_flash_wait_states",
+      "query": "flash memory access wait states at 200 MHz",
+      "difficulty": "M",
+      "expected_pages": [
+        131,
+        135
+      ],
+      "top1": false,
+      "top5": false,
+      "top10": false,
+      "mrr": 0.0,
+      "semantic5": false,
+      "distinct_pages_top10": 21,
+      "top1_modality": "image",
+      "top1_pages": [
+        159,
+        160,
+        169,
+        187
+      ],
+      "top1_title": "NAND controller waveforms and timings",
+      "top1_excerpt_head": "NAND controller waveforms and timings\nWaveforms and timings for the NAND controller in STM32H742xI/G and STM32H743xI/G, including setup times and timings.",
+      "wall_s": 10.87,
+      "indexing_ms": 1083,
+      "query_embedding_ms": 3603,
+      "retrieval_ms": 1636
+    },
+    {
+      "id": "Q05_adc_resolution_sample_rate",
+      "query": "ADC resolution and maximum sampling rate",
+      "difficulty": "E",
+      "expected_pages": [
+        166,
+        170
+      ],
+      "top1": true,
+      "top5": true,
+      "top10": true,
+      "mrr": 1.0,
+      "semantic5": true,
+      "distinct_pages_top10": 31,
+      "top1_modality": "image",
+      "top1_pages": [
+        166,
+        167
+      ],
+      "top1_title": "Delay block (DLYB) characteristics",
+      "top1_excerpt_head": "Delay block (DLYB) characteristics\nParameters for delay block derived from tests under specified conditions.",
+      "wall_s": 9.807,
+      "indexing_ms": 1122,
+      "query_embedding_ms": 2738,
+      "retrieval_ms": 1286
+    },
+    {
+      "id": "Q06_adc_inl",
+      "query": "ADC integral non-linearity INL specification",
+      "difficulty": "M",
+      "expected_pages": [
+        167,
+        170
+      ],
+      "top1": false,
+      "top5": true,
+      "top10": true,
+      "mrr": 0.5,
+      "semantic5": true,
+      "distinct_pages_top10": 55,
+      "top1_modality": "text",
+      "top1_pages": [
+        283,
+        284,
+        285,
+        286,
+        297
+      ],
+      "top1_title": "DAC accuracy",
+      "top1_excerpt_head": "DAC accuracy\nAccuracy of the DAC output buffer in terms of differential nonlinearity (DNL), integral nonlinearity (INL), offset errors, gain error, signal-to-no",
+      "wall_s": 10.168,
+      "indexing_ms": 1154,
+      "query_embedding_ms": 3045,
+      "retrieval_ms": 1399
+    },
+    {
+      "id": "Q07_idd_run_400mhz",
+      "query": "supply current IDD in run mode at 400 MHz",
+      "difficulty": "H",
+      "expected_pages": [
+        109,
+        121
+      ],
+      "top1": true,
+      "top5": true,
+      "top10": true,
+      "mrr": 1.0,
+      "semantic5": true,
+      "distinct_pages_top10": 31,
+      "top1_modality": "text",
+      "top1_pages": [
+        111,
+        119,
+        127,
+        146
+      ],
+      "top1_title": "Current consumption in Run mode",
+      "top1_excerpt_head": "Current consumption in Run mode\nTable detailing typical and maximum current consumption in Run mode with data processing from flash memory, cache enabled, and r",
+      "wall_s": 11.329,
+      "indexing_ms": 1151,
+      "query_embedding_ms": 3872,
+      "retrieval_ms": 1709
+    },
+    {
+      "id": "Q08_idd_stop_mode",
+      "query": "current consumption in stop mode",
+      "difficulty": "M",
+      "expected_pages": [
+        109,
+        122
+      ],
+      "top1": true,
+      "top5": true,
+      "top10": true,
+      "mrr": 1.0,
+      "semantic5": true,
+      "distinct_pages_top10": 43,
+      "top1_modality": "text",
+      "top1_pages": [
+        113
+      ],
+      "top1_title": "Stop mode current consumption",
+      "top1_excerpt_head": "Stop mode current consumption\nTable listing typical and maximum current consumption in Stop mode for STM32H742xI/G and STM32H743xI/G microcontrollers.",
+      "wall_s": 12.453,
+      "indexing_ms": 1174,
+      "query_embedding_ms": 5478,
+      "retrieval_ms": 1169
+    },
+    {
+      "id": "Q09_gpio_drive_current",
+      "query": "GPIO output drive current and slew rate",
+      "difficulty": "M",
+      "expected_pages": [
+        134,
+        140
+      ],
+      "top1": false,
+      "top5": true,
+      "top10": true,
+      "mrr": 0.3333333333333333,
+      "semantic5": false,
+      "distinct_pages_top10": 51,
+      "top1_modality": "image",
+      "top1_pages": [
+        238,
+        242,
+        245,
+        246,
+        247,
+        249,
+        250,
+        251,
+        252,
+        253,
+        254,
+        256,
+        257,
+        258,
+        259
+      ],
+      "top1_title": "Electrical characteristics (rev V)",
+      "top1_excerpt_head": "Electrical characteristics (rev V)\nElectrical characteristics for STM32H742xI/G and STM32H743xI/G microcontrollers.",
+      "wall_s": 10.783,
+      "indexing_ms": 1121,
+      "query_embedding_ms": 3095,
+      "retrieval_ms": 1409
+    },
+    {
+      "id": "Q10_vrefbuf_accuracy",
+      "query": "VREFBUF internal reference voltage accuracy",
+      "difficulty": "M",
+      "expected_pages": [
+        170,
+        176
+      ],
+      "top1": true,
+      "top5": true,
+      "top10": true,
+      "mrr": 1.0,
+      "semantic5": true,
+      "distinct_pages_top10": 24,
+      "top1_modality": "text",
+      "top1_pages": [
+        175
+      ],
+      "top1_title": "VREFBUF characteristics",
+      "top1_excerpt_head": "VREFBUF characteristics\nTable listing start-up times for VREFBUF with different capacitance values.",
+      "wall_s": 11.006,
+      "indexing_ms": 1203,
+      "query_embedding_ms": 2743,
+      "retrieval_ms": 1336
+    },
+    {
+      "id": "Q11_temp_sensor_calibration",
+      "query": "internal temperature sensor calibration values",
+      "difficulty": "M",
+      "expected_pages": [
+        174,
+        178
+      ],
+      "top1": false,
+      "top5": true,
+      "top10": true,
+      "mrr": 0.5,
+      "semantic5": false,
+      "distinct_pages_top10": 10,
+      "top1_modality": "text",
+      "top1_pages": [
+        37
+      ],
+      "top1_title": "Temperature sensor",
+      "top1_excerpt_head": "Temperature sensor\nTemperature sensor for accurate temperature monitoring and synchronization with ADC conversions and timers.",
+      "wall_s": 10.151,
+      "indexing_ms": 1177,
+      "query_embedding_ms": 2961,
+      "retrieval_ms": 1246
+    },
+    {
+      "id": "Q12_dac_settling_time",
+      "query": "DAC settling time and output impedance",
+      "difficulty": "M",
+      "expected_pages": [
+        171,
+        174
+      ],
+      "top1": false,
+      "top5": true,
+      "top10": true,
+      "mrr": 0.5,
+      "semantic5": true,
+      "distinct_pages_top10": 29,
+      "top1_modality": "image",
+      "top1_pages": [
+        269,
+        270,
+        272,
+        277,
+        281,
+        293,
+        295,
+        296,
+        300
+      ],
+      "top1_title": "SDRAM write timings",
+      "top1_excerpt_head": "SDRAM write timings\nSDRAM write timing parameters including FMC_SDCLK period, data output valid time, and chip select hold time.",
+      "wall_s": 10.069,
+      "indexing_ms": 1159,
+      "query_embedding_ms": 2713,
+      "retrieval_ms": 1288
+    }
+  ],
+  "cold_indexing_ms": 0,
+  "notes": {
+    "phase": "D",
+    "reranker_enabled": false,
+    "reranker_reason": "Code path for Moondream2 rerank with reranker_require_gpu=True is implemented and unit-tested (tests/test_reranker_worker_moondream_dispatch.py and tests/test_reranker_gpu_required.py). The numbers captured here were produced with reranker_model=\"none\" on a host where the installed torch build (cu130) cannot reach the cu11.4 driver, so no GPU rerank was possible. An end-to-end smoke run with reranker_model=\"vlm\", reranker_model_id=\"vikhyatk/moondream2\" and reranker_require_gpu=true did exercise the fallback chain: the worker emitted {\"status\":\"fatal\"}, the parent disabled the reranker for the session, and the search continued with MaxSim order (same results as this report).",
+    "host": {
+      "device": "cpu",
+      "reason": "torch 2.11.0+cu130 installed against NVIDIA driver 470.256.02 (CUDA 11.4)"
+    },
+    "vs_phase_b": {
+      "p_at_5": "+0.0000 (unchanged)",
+      "p_at_1": "-0.0834 (one fewer top-1 correct; within CPU vs GPU float precision)",
+      "semantic_at_5": "-0.1667",
+      "mrr": "-0.0417",
+      "avg_query_wall_s": "-13.41 (unclear \u2014 phase-B CUDA path was unexpectedly slower)"
+    },
+    "stop_loss_status": "Phase-D gate (sem@5 +0.05 vs phase-B) could not be evaluated on this host; reranker_model stays defaulted to \"none\" in ragrag/config.py. Re-run on a GPU-capable env to decide whether to flip the default."
+  }
+}

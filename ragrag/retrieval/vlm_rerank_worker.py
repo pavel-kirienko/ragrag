@@ -71,15 +71,75 @@ def main() -> int:
     parser.add_argument("--quantization", default="auto")
     parser.add_argument("--image-max-side", type=int, default=640)
     parser.add_argument("--max-new-tokens", type=int, default=384)
+    parser.add_argument(
+        "--require-gpu",
+        action="store_true",
+        help="Refuse to run on CPU. If the loader places the model on "
+             "anything other than 'cuda', emit a fatal status line and "
+             "exit non-zero. The parent process then disables the "
+             "reranker for the rest of the session.",
+    )
+    parser.add_argument(
+        "--activation-headroom-mib",
+        type=int,
+        default=512,
+        help="After loading weights, log a warning if free VRAM is "
+             "below this threshold.",
+    )
     args = parser.parse_args()
 
     try:
         from ragrag.embedding.vlm_loader import load_vlm
 
-        handle = load_vlm(args.model_id, quantization=args.quantization)
+        # When the reranker is pinned to GPU we pass device="cuda"
+        # explicitly so the loader does not silently fall back to CPU
+        # when free VRAM is below its own safety threshold (the parent
+        # process just unloaded everything it could unload; whatever
+        # is left is what we have to work with).
+        handle = load_vlm(
+            args.model_id,
+            quantization=args.quantization,
+            device="cuda" if args.require_gpu else None,
+        )
     except Exception as exc:  # noqa: BLE001
-        _emit({"status": "fatal", "error": f"vlm load failed: {exc}\n{traceback.format_exc()}"})
+        _emit({"status": "fatal", "error": f"vlm load failed: {exc}\n{traceback.format_exc()[-600:]}"})
         return 2
+
+    if args.require_gpu and str(getattr(handle, "device", "") or "").lower() != "cuda":
+        _emit(
+            {
+                "status": "fatal",
+                "error": (
+                    f"reranker requires GPU but handle landed on "
+                    f"{handle.device!r}; refusing to run on CPU "
+                    "(--require-gpu). Set reranker_require_gpu=false "
+                    "in ragrag.json to opt back into CPU rerank."
+                ),
+            }
+        )
+        try:
+            handle.unload()
+        except Exception:
+            pass
+        return 3
+
+    # Placement probe: warn if the activation budget looks tight. We
+    # deliberately do not fall back here — the caller explicitly asked
+    # for GPU and the worker's job is to succeed or die loudly.
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            free_mib = torch.cuda.mem_get_info(0)[0] // (1024 * 1024)
+            if free_mib < int(args.activation_headroom_mib):
+                sys.stderr.write(
+                    f"[rerank-worker] WARNING: only {free_mib} MiB free VRAM "
+                    f"after load (headroom threshold {args.activation_headroom_mib} MiB); "
+                    "a 10-image rerank prompt may OOM.\n"
+                )
+                sys.stderr.flush()
+    except Exception:
+        pass
 
     _emit({"status": "ready", "device": handle.device, "model_id": handle.model_id})
 
@@ -154,21 +214,18 @@ def _handle_rerank(handle, request: dict, args) -> dict:
 
 
 def _build_prompt(query: str, candidates: list[dict]) -> str:
+    """Build a terse listwise rerank prompt.
+
+    Tuned for Moondream2: shorter preamble, imperative voice, and the
+    output schema shown as a literal example so the model has fewer
+    degrees of freedom to hallucinate prose around the JSON.
+    """
     lines: list[str] = []
-    lines.append(
-        f'A user is searching a technical document corpus for: "{query}"\n'
-    )
-    lines.append(
-        f"Below are {len(candidates)} candidate topic chunks. For each candidate you see "
-        "its title, a one-sentence summary, the pages it covers, a short excerpt "
-        "and (when available) a representative page image.\n"
-    )
-    lines.append(
-        "Rank the candidates from most to least relevant to the query. "
-        "Use ONLY the information visible in the candidate block — do not "
-        "invent pages or facts.\n"
-    )
-    lines.append("Candidates:\n")
+    lines.append(f'Query: "{query}"')
+    lines.append("")
+    lines.append(f"Rank these {len(candidates)} candidates by relevance to the query.")
+    lines.append("Use only the information shown.")
+    lines.append("")
     for c in candidates:
         lines.append(
             f"[{c.get('id')}] {c.get('title') or '(untitled)'} (pages {c.get('pages') or '?'})"
@@ -181,13 +238,9 @@ def _build_prompt(query: str, candidates: list[dict]) -> str:
             lines.append(f"  excerpt: {excerpt[:240]}")
         lines.append("")
     lines.append(
-        "Output a JSON array. Each entry must be an object with:\n"
-        '  "id" — the [N] identifier above\n'
-        '  "rank" — 1 = most relevant\n'
-        '  "score" — 0 (irrelevant) to 9 (directly answers the query)\n'
-        '  "reason" — one short sentence explaining the placement\n'
-        "Output ONLY the JSON array, no prose, no fences."
+        'Output JSON only, no prose: [{"id":N,"rank":1,"score":0-9,"reason":"..."}, ...]'
     )
+    lines.append("rank 1 = most relevant. score 9 = directly answers. Every id must appear.")
     return "\n".join(lines)
 
 
